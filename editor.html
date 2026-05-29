@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scriben</title>
+    <meta name="description" content="Scriben is a free and open source web-based document editor." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600&family=Inter:wght@400;500;600&display=swap"
+        rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="css/editor.css?v=1.1" />
+    <link rel="icon" href="icons/HF-Logo.ico" />
+    <!-- PouchDB -->
+    <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
+</head>
+
+<body>
+    <!-- Unsupported Screen Message -->
+    <div id="unsupported-screen">
+        <div class="message-box">
+            <span class="material-symbols-outlined"
+                style="font-size: 48px; color: #64748b; margin-bottom: 16px;">smartphone</span>
+            <h2 style="font-family: 'Google Sans', sans-serif; margin-bottom: 8px; color: #1e293b;">
+                Device too small
+            </h2>
+            <p style="font-family: 'Inter', sans-serif; color: #64748b; font-size: 14px;">
+                Scriben is designed to support pagination. Please use a device with a larger screen to experience
+                Scriben.
+            </p>
+        </div>
+    </div>
+    <header
+        style="position: sticky; top: 0; z-index: 10; display: flex; flex-direction: column; background: var(--color-toolbar); backdrop-filter: blur(8px); box-shadow: var(--shadow-sm);">
+        <!-- Top Menu -->
+        <div
+            style="display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 8px 16px; border-bottom: 1px solid var(--color-toolbar-border);">
+            <div style="display: flex; align-items: center; gap: 24px;">
+                <!-- Brand -->
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="material-symbols-outlined" style="color: #005bbf; font-size: 24px;">description</span>
+                    <span
+                        style="font-size: 18px; font-weight: bold; color: #005bbf; font-family: 'Google Sans', sans-serif;">Scriben</span>
+                </div>
+                <!-- Document Title & Menu -->
+                <div style="display: flex; flex-direction: column;">
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <input type="text" id="document-title" value="Untitled document"
+                            style="font-size: 18px; font-family: 'Google Sans', sans-serif; background: transparent; border: none; outline: none; padding: 4px 8px; border-radius: 4px; width: 200px; color: #111827;"
+                            onfocus="this.style.background='var(--color-hover)'"
+                            onblur="this.style.background='transparent'">
+                    </div>
+                    <div
+                        style="display: flex; gap: 8px; font-size: 14px; margin-top: 4px; padding: 0 4px; color: #414754;">
+                        <!-- File Dropdown -->
+                        <div class="dropdown" style="position: relative; display: inline-block;">
+                            <span id="menu-file-trigger"
+                                style="cursor: pointer; padding: 2px 6px; border-radius: 4px; display: inline-block;"
+                                onmouseover="this.style.background='var(--color-hover)'"
+                                onmouseout="this.style.background='transparent'">File</span>
+                            <div class="dropdown-menu" id="file-dropdown"
+                                style="display: none; position: absolute; top: 100%; left: 0; background: #ffffff; border: 1px solid var(--color-toolbar-border); border-radius: 6px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); min-width: 180px; z-index: 1000; padding: 4px 0; font-family: 'Inter', sans-serif;">
+                                <a href="#" id="menu-new-doc"
+                                    style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; color: #1e293b; text-decoration: none; font-size: 13px; font-weight: 500; transition: background-color 0.2s;"
+                                    onmouseover="this.style.backgroundColor='var(--color-hover)'"
+                                    onmouseout="this.style.backgroundColor='transparent'">
+                                    <span class="material-symbols-outlined" style="font-size: 18px;">note_add</span>
+                                    New document
+                                </a>
+                                <div style="height: 1px; background: var(--color-toolbar-border); margin: 4px 0;"></div>
+                                <a href="#" id="menu-toggle-offline"
+                                    style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; color: #1e293b; text-decoration: none; font-size: 13px; font-weight: 500; transition: background-color 0.2s;"
+                                    onmouseover="this.style.backgroundColor='var(--color-hover)'"
+                                    onmouseout="this.style.backgroundColor='transparent'">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">offline_pin</span>
+                                        Save for offline use
+                                    </div>
+                                    <span id="offline-check" class="material-symbols-outlined"
+                                        style="font-size: 18px; color: #005bbf; display: none;">check</span>
+                                </a>
+                                <div style="height: 1px; background: var(--color-toolbar-border); margin: 4px 0;"></div>
+                                <a href="#" id="menu-export-pdf"
+                                    style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; color: #1e293b; text-decoration: none; font-size: 13px; font-weight: 500; transition: background-color 0.2s;"
+                                    onmouseover="this.style.backgroundColor='var(--color-hover)'"
+                                    onmouseout="this.style.backgroundColor='transparent'">
+                                    <span class="material-symbols-outlined"
+                                        style="font-size: 18px;">picture_as_pdf</span>
+                                    Export as PDF
+                                </a>
+                            </div>
+                        </div>
+                        <span style="cursor: pointer; padding: 2px 6px; border-radius: 4px;"
+                            onmouseover="this.style.background='var(--color-hover)'"
+                            onmouseout="this.style.background='transparent'">Edit</span>
+                        <span style="cursor: pointer; padding: 2px 6px; border-radius: 4px;"
+                            onmouseover="this.style.background='var(--color-hover)'"
+                            onmouseout="this.style.background='transparent'">View</span>
+                        <span style="cursor: pointer; padding: 2px 6px; border-radius: 4px;"
+                            onmouseover="this.style.background='var(--color-hover)'"
+                            onmouseout="this.style.background='transparent'">Insert</span>
+                        <span style="cursor: pointer; padding: 2px 6px; border-radius: 4px;"
+                            onmouseover="this.style.background='var(--color-hover)'"
+                            onmouseout="this.style.background='transparent'">Format</span>
+                    </div>
+                </div>
+            </div>
+            <!-- Sync Indicator & Settings Controls -->
+            <div style="display: flex; align-items: center; gap: 12px; position: relative;">
+                <div id="sync-status" class="sync-badge offline" title="Sync Status"
+                    style="display: flex; align-items: center; gap: 6px; font-family: 'Inter', sans-serif; font-size: 13px; color: #64748b; background: var(--color-hover); padding: 4px 10px; border-radius: 20px; font-weight: 500; cursor: pointer; transition: background-color 0.2s;">
+                    <span class="material-symbols-outlined" style="font-size: 16px;">cloud_off</span>
+                    <span class="sync-text">Offline</span>
+                </div>
+                <!-- Login Button (shown when logged out) -->
+                <button id="btn-sync-login"
+                    style="padding: 8px 16px; background: #0b57d0; color: #ffffff; border: none; border-radius: 100px; font-size: 14px; font-weight: 500; cursor: pointer; font-family: 'Google Sans', sans-serif; transition: background-color 0.2s; display: none;"
+                    onmouseover="this.style.background='#0842a0'" onmouseout="this.style.background='#0b57d0'">
+                    Sign in
+                </button>
+                <!-- Profile Avatar/Icon Button (shown when logged in) -->
+                <button id="btn-sync-profile" title="Sync Profile"
+                    style="width: 32px; height: 32px; border-radius: 50%; display: none; align-items: center; justify-content: center; overflow: hidden; padding: 0; background: transparent; border: none; cursor: pointer; position: relative;">
+                    <img id="header-profile-avatar" src="" alt="Avatar"
+                        style="width: 100%; height: 100%; object-fit: cover; display: none; border-radius: 50%;">
+                    <div id="header-profile-letter"
+                        style="width: 100%; height: 100%; display: none; align-items: center; justify-content: center; font-size: 14px; font-weight: 500; color: #ffffff; font-family: 'Google Sans', sans-serif; border-radius: 50%;">
+                    </div>
+                    <span id="header-profile-icon" class="material-symbols-outlined"
+                        style="font-size: 24px; color: #64748b;">account_circle</span>
+                </button>
+
+                <!-- Account Dropdown Card -->
+                <div id="account-dropdown"
+                    style="display: none; position: absolute; top: calc(100% + 8px); right: 0; background: #ffffff; border-radius: 20px; box-shadow: 0 1px 3px 0 rgba(60,64,67,0.3), 0 4px 8px 3px rgba(60,64,67,0.15); width: 330px; z-index: 10000; padding: 24px 20px 20px 20px; font-family: 'Inter', sans-serif; flex-direction: column; align-items: center; text-align: center; border: 1px solid #e0e0e0; box-sizing: border-box;">
+                    <!-- Email and profile container -->
+                    <div style="font-size: 13px; color: #5f6368; width: 100%; margin-bottom: 12px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                        id="account-dropdown-email">email@example.com</div>
+
+                    <!-- Large Avatar Circle -->
+                    <div id="dropdown-profile-avatar-container"
+                        style="position: relative; margin: 8px auto 16px auto; width: 80px; height: 80px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #f1f3f4; border: 1px solid #e0e0e0;">
+                        <img id="dropdown-profile-avatar" src="" alt="Avatar"
+                            style="width: 100%; height: 100%; object-fit: cover; display: none; border-radius: 50%;">
+                        <div id="dropdown-profile-letter"
+                            style="width: 100%; height: 100%; display: none; align-items: center; justify-content: center; font-size: 36px; font-weight: 500; color: #ffffff; font-family: 'Google Sans', sans-serif; border-radius: 50%;">
+                        </div>
+                        <span id="dropdown-profile-icon" class="material-symbols-outlined"
+                            style="font-size: 80px; color: #9aa0a6;">account_circle</span>
+                    </div>
+
+                    <!-- Display Name -->
+                    <div id="dropdown-profile-username"
+                        style="font-family: 'Google Sans', sans-serif; font-size: 18px; font-weight: 500; color: #202124; margin-bottom: 24px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        Username</div>
+
+                    <!-- Actions -->
+                    <div style="display: flex; flex-direction: column; width: 100%; gap: 10px; align-items: center;">
+                        <button id="btn-dropdown-signout"
+                            style="width: auto; min-width: 160px; padding: 8px 24px; border: 1px solid #dadce0; border-radius: 100px; font-size: 14px; font-weight: 500; color: #3c4043; background: transparent; cursor: pointer; transition: background-color 0.2s;"
+                            onmouseover="this.style.backgroundColor='#f7f8f8'"
+                            onmouseout="this.style.backgroundColor='transparent'">
+                            Sign out
+                        </button>
+                        <button id="btn-dropdown-purge"
+                            style="width: auto; min-width: 160px; padding: 8px 16px; border: none; border-radius: 100px; font-size: 13px; font-weight: 500; color: #d93025; background: transparent; cursor: pointer; transition: background-color 0.2s;"
+                            onmouseover="this.style.backgroundColor='#fce8e6'"
+                            onmouseout="this.style.backgroundColor='transparent'">
+                            Purge Local Cache
+                        </button>
+                    </div>
+
+                    <!-- Footer links -->
+                    <div
+                        style="border-top: 1px solid #e8eaed; width: 100%; margin-top: 20px; padding-top: 12px; display: flex; justify-content: center; gap: 12px; font-size: 12px; color: #5f6368;">
+                        <a href="privacy.html" target="_blank" style="color: #5f6368; text-decoration: none;">Privacy
+                            Policy</a>
+                        <span>•</span>
+                        <a href="terms.html" target="_blank" style="color: #5f6368; text-decoration: none;">Terms of
+                            Service</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Formatting Toolbar -->
+        <div class="toolbar" style="position: static; box-shadow: none; z-index: auto; border-bottom: none;">
+            <!-- Toolbar Buttons -->
+            <button class="tool-button" data-command="undo" title="Undo"><span
+                    class="material-symbols-outlined">undo</span></button>
+            <button class="tool-button" data-command="redo" title="Redo"><span
+                    class="material-symbols-outlined">redo</span></button>
+            <button class="tool-button" id="exportPdfBtn" title="Export as PDF"><span
+                    class="material-symbols-outlined">print</span></button>
+
+            <div style="width: 1px; height: 24px; background: var(--color-toolbar-border); margin: auto 4px;"></div>
+
+            <select id="fontSelect" title="Content Font">
+                <option value="Inter" selected>Inter</option>
+                <option value="Arial">Arial</option>
+                <option value="Georgia">Georgia</option>
+                <option value="Times New Roman">Times New Roman</option>
+                <option value="Roboto">Roboto</option>
+                <option value="Calibri">Calibri</option>
+            </select>
+
+            <select id="fontSizeSelect" title="Font Size">
+                <option value="3">Small</option>
+                <option value="4" selected>Normal</option>
+                <option value="5">Subtitle</option>
+                <option value="6">Title</option>
+            </select>
+
+            <div style="width: 1px; height: 24px; background: var(--color-toolbar-border); margin: auto 4px;"></div>
+
+            <button class="tool-button" data-command="bold" title="Bold"><span class="material-symbols-outlined"
+                    style="font-weight: bold;">format_bold</span></button>
+            <button class="tool-button" data-command="italic" title="Italic"><span class="material-symbols-outlined"
+                    style="font-style: italic;">format_italic</span></button>
+            <button class="tool-button" data-command="underline" title="Underline"><span
+                    class="material-symbols-outlined"
+                    style="text-decoration: underline;">format_underlined</span></button>
+            <button class="tool-button" data-command="foreColor" title="Text Color"><span
+                    class="material-symbols-outlined">format_color_text</span></button>
+            <button class="tool-button" data-command="backColor" title="Highlight"><span
+                    class="material-symbols-outlined">format_color_fill</span></button>
+
+            <div style="width: 1px; height: 24px; background: var(--color-toolbar-border); margin: auto 4px;"></div>
+
+            <button class="tool-button" data-command="justifyLeft" title="Align Left"><span
+                    class="material-symbols-outlined">format_align_left</span></button>
+            <button class="tool-button" data-command="justifyCenter" title="Align Center"><span
+                    class="material-symbols-outlined">format_align_center</span></button>
+            <button class="tool-button" data-command="justifyRight" title="Align Right"><span
+                    class="material-symbols-outlined">format_align_right</span></button>
+
+            <div style="width: 1px; height: 24px; background: var(--color-toolbar-border); margin: auto 4px;"></div>
+
+            <button class="tool-button" data-command="insertUnorderedList" title="Bullet List"><span
+                    class="material-symbols-outlined">format_list_bulleted</span></button>
+            <button class="tool-button" data-command="insertOrderedList" title="Numbered List"><span
+                    class="material-symbols-outlined">format_list_numbered</span></button>
+
+            <div style="width: 1px; height: 24px; background: var(--color-toolbar-border); margin: auto 4px;"></div>
+
+            <button class="tool-button" data-command="createLink" title="Insert Link"><span
+                    class="material-symbols-outlined">link</span></button>
+            <input type="file" id="imageInput" accept="image/*" style="display:none;" />
+            <button class="tool-button" id="imageBtn" title="Insert Image"><span
+                    class="material-symbols-outlined">image</span></button>
+        </div>
+    </header>
+    <div id="pages-container">
+        <div class="page" contenteditable="true" spellcheck="true"></div>
+    </div>
+    <script type="module" src="js/editor.js"></script>
+
+    <!-- Settings & Sync Modal -->
+    <div id="settings-modal" class="modal-overlay"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(8px); z-index: 10000; justify-content: center; align-items: center; transition: opacity 0.3s ease;">
+        <div class="modal-card"
+            style="background: #ffffff; border: 1px solid var(--color-toolbar-border); border-radius: 8px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); width: 100%; max-width: 440px; padding: 24px; display: flex; flex-direction: column; gap: 20px; font-family: 'Inter', sans-serif;">
+            <div class="settings-header"
+                style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--color-toolbar-border); padding-bottom: 12px;">
+                <h2
+                    style="font-family: 'Google Sans', sans-serif; font-size: 18px; font-weight: 600; color: #0f172a; margin: 0; display: flex; align-items: center; gap: 8px;">
+                    <span class="material-symbols-outlined"
+                        style="color: #005bbf; font-variation-settings: 'FILL' 1;">cloud_sync</span>
+                    Sign in to secure sync
+                </h2>
+            </div>
+
+            <div class="settings-body" style="display: flex; flex-direction: column; gap: 16px;">
+                <p style="font-size: 13px; line-height: 1.5; color: #64748b; margin: 0;">
+                    Sync your documents with your personal Filen account. Notes are encrypted client-side; your password
+                    and plaintext data are never sent to Filen.
+                </p>
+
+                <!-- Login Credentials Container -->
+                <div id="sync-credentials-container"
+                    style="display: flex; flex-direction: column; gap: 12px; width: 100%;">
+                    <div style="display: flex; flex-direction: column; gap: 4px; text-align: left;">
+                        <label for="sync-email" style="font-size: 12px; font-weight: 600; color: #475569;">Filen
+                            Email</label>
+                        <input type="email" id="sync-email" placeholder="your-email@example.com"
+                            style="width: 100%; padding: 10px 12px; border: 1px solid var(--color-toolbar-border); border-radius: 6px; font-size: 14px; outline: none; transition: border-color 0.2s; font-family: 'Inter', sans-serif;"
+                            onfocus="this.style.borderColor='#005bbf'"
+                            onblur="this.style.borderColor='var(--color-toolbar-border)'" autocomplete="username">
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 4px; text-align: left;">
+                        <label for="sync-password" style="font-size: 12px; font-weight: 600; color: #475569;">Filen
+                            Password</label>
+                        <input type="password" id="sync-password" placeholder="Enter your password"
+                            style="width: 100%; padding: 10px 12px; border: 1px solid var(--color-toolbar-border); border-radius: 6px; font-size: 14px; outline: none; transition: border-color 0.2s; font-family: 'Inter', sans-serif;"
+                            onfocus="this.style.borderColor='#005bbf'"
+                            onblur="this.style.borderColor='var(--color-toolbar-border)'"
+                            autocomplete="current-password">
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 4px; text-align: left;">
+                        <label for="sync-twofactor"
+                            style="font-size: 12px; font-weight: 600; color: #475569;">Two-Factor Auth Code
+                            (Optional)</label>
+                        <input type="text" id="sync-twofactor" placeholder="6-digit code if enabled"
+                            style="width: 100%; padding: 10px 12px; border: 1px solid var(--color-toolbar-border); border-radius: 6px; font-size: 14px; outline: none; transition: border-color 0.2s; font-family: 'Inter', sans-serif;"
+                            onfocus="this.style.borderColor='#005bbf'"
+                            onblur="this.style.borderColor='var(--color-toolbar-border)'">
+                    </div>
+                </div>
+
+                <!-- Status message -->
+                <div id="sync-settings-status"
+                    style="font-size: 13px; text-align: center; min-height: 20px; font-family: 'Inter', sans-serif; transition: color 0.2s;">
+                </div>
+
+                <!-- Settings / Sync Actions -->
+                <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px; width: 100%;">
+                    <button id="btn-save-sync"
+                        style="width: 100%; padding: 10px; background: #005bbf; color: #ffffff; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 0.2s; font-family: 'Inter', sans-serif;"
+                        onmouseover="this.style.background='#004b9e'" onmouseout="this.style.background='#005bbf'">
+                        Save & Enable Sync
+                    </button>
+                    <button id="btn-save-sync-cancel"
+                        style="width: 100%; padding: 10px; background: transparent; border: 1px solid var(--color-toolbar-border); color: #64748b; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 0.2s; font-family: 'Inter', sans-serif;"
+                        onmouseover="this.style.background='var(--color-hover)'"
+                        onmouseout="this.style.background='transparent'">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

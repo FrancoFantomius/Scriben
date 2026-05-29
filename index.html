@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Scriben - A modern, fast, and vibrant web-based document editor.">
+    <title>Scriben</title>
+
+    <!-- Favicon -->
+    <link rel="shortcut icon" href="./icons/HF-Logo.ico" type="image/x-icon">
+
+    <!-- Local Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+        rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap" rel="stylesheet" />
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="./css/index.css">
+</head>
+
+<body>
+    <!-- Animated background elements -->
+    <div class="background">
+        <div class="glow-orb orb-1"></div>
+        <div class="glow-orb orb-2"></div>
+    </div>
+
+    <!-- Header -->
+    <header class="glass-header">
+        <a href="#" class="header-brand">
+            <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">description</span>
+            Scriben
+        </a>
+
+        <nav class="header-nav" style="display: none;">
+            <!-- Hidden on mobile, handled via CSS -->
+            <a href="#">Description</a>
+            <a href="#">Features</a>
+            <a href="#">Templates</a>
+        </nav>
+        <nav class="header-nav">
+            <a href="#">Description</a>
+            <a href="#features">Features</a>
+            <a href="#">Templates</a>
+        </nav>
+
+        <div class="header-actions">
+            <a href="#" style="color: var(--text-secondary); text-decoration: none; display: none;">Sign In</a>
+            <!-- Can hide on small screens -->
+            <a href="./editor.html" class="btn-primary">Get Started</a>
+        </div>
+    </header>
+
+    <main class="main-content">
+        <section class="hero-section glass-card">
+            <h1 class="title">Write, Collaborate, Create</h1>
+            <p class="subtitle">
+                Scriben is the modern document editor. Experience fast local editing, rich formatting,
+                and intuitive organization in a clean, distraction-free environment designed for high-focus
+                productivity.
+            </p>
+            <div class="action-container">
+                <a href="./editor.html" class="btn-primary">Get Started</a>
+                <a href="#" class="btn-secondary">Discover Features</a>
+            </div>
+        </section>
+
+        <!-- Feature Grid -->
+        <section class="features-section" id="features">
+            <h2 class="features-title">Everything you need to do your best work.</h2>
+            <div class="features-grid">
+                <!-- Feature 1 -->
+                <div class="feature-card">
+                    <div class="feature-icon"><span class="material-symbols-outlined"
+                            style="font-size: 40px; font-variation-settings: 'FILL' 1;">save</span></div>
+                    <h3 class="feature-title">Local Auto-Save</h3>
+                    <p style="color: var(--text-secondary); line-height: 1.5;">Your documents are automatically saved
+                        directly in your browser. Never lose your progress, with zero cloud dependency and complete
+                        privacy.</p>
+                </div>
+                <!-- Feature 2 -->
+                <div class="feature-card">
+                    <div class="feature-icon"><span class="material-symbols-outlined"
+                            style="font-size: 40px; font-variation-settings: 'FILL' 1;">format_paint</span></div>
+                    <h3 class="feature-title">Rich Formatting</h3>
+                    <p style="color: var(--text-secondary); line-height: 1.5;">Access a comprehensive suite of
+                        formatting tools designed to make your documents look professional without the clutter.</p>
+                </div>
+                <!-- Feature 3 -->
+                <div class="feature-card">
+                    <div class="feature-icon"><span class="material-symbols-outlined"
+                            style="font-size: 40px; font-variation-settings: 'FILL' 1;">picture_as_pdf</span></div>
+                    <h3 class="feature-title">PDF Export</h3>
+                    <p style="color: var(--text-secondary); line-height: 1.5;">Easily export your beautifully formatted
+                        A4 documents into pixel-perfect PDF files with a single click, ready for printing or sharing.
+                    </p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="glass-footer">
+        <div>
+            <span
+                style="font-weight: bold; font-size: 1.2rem; color: var(--text-primary); margin-right: 1rem;">Scriben</span>
+        </div>
+        <nav class="footer-nav">
+            <a href="./privacy.html">Privacy Policy</a>
+            <a href="./terms.html">Terms of Service</a>
+        </nav>
+    </footer>
+</body>
+
+</html>
