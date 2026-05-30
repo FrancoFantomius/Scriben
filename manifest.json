@@ -2,7 +2,7 @@
   "name": "Noten",
   "short_name": "Noten",
   "description": "Fast, local-first, end-to-end encrypted notes.",
-  "start_url": "./index.html",
+  "start_url": "/",
   "display": "standalone",
   "background_color": "#0e1117",
   "theme_color": "#f59e0b",
