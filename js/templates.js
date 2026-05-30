@@ -22,6 +22,7 @@ import resumeHtml from "../templates/resume.html?raw";
 import coverLetterHtml from "../templates/cover_letter.html?raw";
 
 document.addEventListener('DOMContentLoaded', () => {
+    localStorage.setItem('scriben-has-used', 'true');
     // --- State variables ---
     let allDocs = [];
 

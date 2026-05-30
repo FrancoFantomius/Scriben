@@ -27,9 +27,13 @@ export default defineConfig({
           if (req.url) {
             const url = new URL(req.url, 'http://localhost');
             const pathname = url.pathname;
-            const lastSegment = pathname.split('/').pop() || '';
-            if (pathname !== '/' && !lastSegment.includes('.') && !pathname.startsWith('/@')) {
-              req.url = pathname + '.html' + url.search;
+            if (pathname === '/') {
+              req.url = '/pages/index.html' + url.search;
+            } else {
+              const lastSegment = pathname.split('/').pop() || '';
+              if (!lastSegment.includes('.') && !pathname.startsWith('/@')) {
+                req.url = '/pages' + pathname + '.html' + url.search;
+              }
             }
           }
           next();
@@ -44,11 +48,11 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        main: path.resolve(__dirname, 'index.html'),
-        editor: path.resolve(__dirname, 'editor.html'),
-        templates: path.resolve(__dirname, 'templates.html'),
-        privacy: path.resolve(__dirname, 'privacy.html'),
-        terms: path.resolve(__dirname, 'terms.html'),
+        main: path.resolve(__dirname, 'pages/index.html'),
+        editor: path.resolve(__dirname, 'pages/editor.html'),
+        templates: path.resolve(__dirname, 'pages/templates.html'),
+        privacy: path.resolve(__dirname, 'pages/privacy.html'),
+        terms: path.resolve(__dirname, 'pages/terms.html'),
       }
     }
   }

@@ -14,14 +14,354 @@ import {
     stopSync,
     destroyDatabase
 } from './sync.js';
+import { initFonts } from './options.js';
 
 document.addEventListener('DOMContentLoaded', () => {
+    localStorage.setItem('scriben-has-used', 'true');
     const container = document.getElementById('pages-container');
+
+    let lastSelectionRange = null;
+
+    function saveSelection() {
+        const sel = window.getSelection();
+        if (sel.rangeCount > 0) {
+            const range = sel.getRangeAt(0);
+            if (findParentPage(range.startContainer)) {
+                lastSelectionRange = range.cloneRange();
+            }
+        }
+    }
+
+    function restoreSelection() {
+        if (lastSelectionRange) {
+            const sel = window.getSelection();
+            const page = findParentPage(lastSelectionRange.startContainer);
+            if (page) page.focus();
+            sel.removeAllRanges();
+            sel.addRange(lastSelectionRange);
+        } else {
+            const pages = getPages();
+            if (pages.length > 0) {
+                const firstPage = pages[0];
+                firstPage.focus();
+                const sel = window.getSelection();
+                const range = document.createRange();
+                range.selectNodeContents(firstPage);
+                range.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(range);
+            }
+        }
+    }
+
+    document.addEventListener('selectionchange', saveSelection);
+
+    // --- Custom Modal Handlers for Link and Table ---
+    const linkModal = document.getElementById('link-modal');
+    const linkUrlInput = document.getElementById('link-url');
+    const linkTextInput = document.getElementById('link-text');
+    const btnLinkCancel = document.getElementById('btn-link-cancel');
+    const btnLinkInsert = document.getElementById('btn-link-insert');
+
+    const tableModal = document.getElementById('table-modal');
+    const tableRowsInput = document.getElementById('table-rows');
+    const tableColsInput = document.getElementById('table-cols');
+    const btnTableCancel = document.getElementById('btn-table-cancel');
+    const btnTableInsert = document.getElementById('btn-table-insert');
+
+    // Link Floating Tooltip Elements
+    const linkTooltip = document.getElementById('link-tooltip');
+    const linkTooltipUrl = document.getElementById('link-tooltip-url');
+    const linkTooltipEdit = document.getElementById('link-tooltip-edit');
+    const linkTooltipRemove = document.getElementById('link-tooltip-remove');
+
+    let activeLinkToEdit = null;
+    let hoveredLink = null;
+
+    function openLinkModal(linkToEdit = null) {
+        if (!linkModal) return;
+        activeLinkToEdit = linkToEdit;
+
+        let selectedText = '';
+        const sel = window.getSelection();
+        if (sel.rangeCount > 0) {
+            selectedText = sel.toString().trim();
+        }
+
+        if (activeLinkToEdit) {
+            if (linkUrlInput) linkUrlInput.value = activeLinkToEdit.getAttribute('href') || '';
+            if (linkTextInput) linkTextInput.value = activeLinkToEdit.textContent || '';
+        } else {
+            if (linkUrlInput) linkUrlInput.value = 'https://';
+            if (linkTextInput) linkTextInput.value = selectedText;
+        }
+
+        linkModal.style.display = 'flex';
+        
+        if (linkTextInput && linkTextInput.value) {
+            if (linkUrlInput) {
+                linkUrlInput.focus();
+                setTimeout(() => linkUrlInput.select(), 50);
+            }
+        } else if (linkTextInput) {
+            linkTextInput.focus();
+        }
+    }
+
+    function closeLinkModal() {
+        if (linkModal) linkModal.style.display = 'none';
+        activeLinkToEdit = null;
+    }
+
+    if (btnLinkCancel) {
+        btnLinkCancel.addEventListener('click', closeLinkModal);
+    }
+
+    if (btnLinkInsert) {
+        btnLinkInsert.addEventListener('click', () => {
+            const url = linkUrlInput.value.trim();
+            const text = linkTextInput.value.trim();
+            closeLinkModal();
+
+            if (url && url !== 'https://') {
+                if (activeLinkToEdit) {
+                    activeLinkToEdit.setAttribute('href', url);
+                    activeLinkToEdit.textContent = text || url;
+                    paginate();
+                    saveContent();
+                } else {
+                    const display = text || url;
+                    const anchorHtml = `<a href="${url}" target="_blank">${display}</a>`;
+                    exec('insertHTML', anchorHtml);
+                }
+            }
+        });
+    }
+
+    [linkUrlInput, linkTextInput].forEach(input => {
+        if (input) {
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    btnLinkInsert.click();
+                } else if (e.key === 'Escape') {
+                    closeLinkModal();
+                }
+            });
+        }
+    });
+
+    function openTableModal() {
+        if (tableModal && tableRowsInput && tableColsInput) {
+            tableRowsInput.value = '3';
+            tableColsInput.value = '3';
+            tableModal.style.display = 'flex';
+            tableRowsInput.focus();
+        }
+    }
+
+    function closeTableModal() {
+        if (tableModal) tableModal.style.display = 'none';
+    }
+
+    if (btnTableCancel) {
+        btnTableCancel.addEventListener('click', closeTableModal);
+    }
+
+    if (btnTableInsert) {
+        btnTableInsert.addEventListener('click', () => {
+            const rows = parseInt(tableRowsInput.value, 10);
+            const cols = parseInt(tableColsInput.value, 10);
+            closeTableModal();
+            if (!isNaN(rows) && !isNaN(cols) && rows > 0 && rows <= 10 && cols > 0 && cols <= 10) {
+                let tableHtml = '<table class="unbreakable">';
+                for (let r = 0; r < rows; r++) {
+                    tableHtml += '<tr>';
+                    for (let c = 0; c < cols; c++) {
+                        tableHtml += r === 0 ? '<th>Header</th>' : '<td>Cell</td>';
+                    }
+                    tableHtml += '</tr>';
+                }
+                tableHtml += '</table>';
+                exec('insertHTML', tableHtml);
+            } else {
+                alert('Invalid input. Please enter numbers between 1 and 10.');
+            }
+        });
+    }
+
+    [tableRowsInput, tableColsInput].forEach(input => {
+        if (input) {
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    btnTableInsert.click();
+                } else if (e.key === 'Escape') {
+                    closeTableModal();
+                }
+            });
+        }
+    });
+
+    // --- Custom Color Picker Popover Logic ---
+    const colorPickerPopover = document.getElementById('color-picker-popover');
+    const colorPickerTitle = document.getElementById('color-picker-title');
+    const colorPaletteGrid = document.getElementById('color-palette-grid');
+    const btnCustomColor = document.getElementById('btn-custom-color');
+    const nativeColorPicker = document.getElementById('native-color-picker');
+
+    let activeColorCommand = 'foreColor';
+
+    const customPaletteColors = [
+        '#000000', '#4a5568', '#718096', '#cbd5e0', '#ffffff',
+        '#e53e3e', '#dd6b20', '#ecc94b', '#38a169', '#3182ce',
+        '#805ad5', '#d53f8c', '#319795', '#2c5282', '#2f855a'
+    ];
+
+    if (colorPaletteGrid) {
+        customPaletteColors.forEach(color => {
+            const cell = document.createElement('div');
+            cell.style.width = '20px';
+            cell.style.height = '20px';
+            cell.style.borderRadius = '50%';
+            cell.style.backgroundColor = color;
+            cell.style.cursor = 'pointer';
+            cell.style.border = '1px solid var(--color-toolbar-border)';
+            cell.style.boxShadow = 'inset 0 1px 2px rgba(0,0,0,0.1)';
+            cell.style.transition = 'transform 0.15s ease, border-color 0.15s ease';
+            cell.title = color;
+
+            cell.addEventListener('mouseover', () => {
+                cell.style.transform = 'scale(1.2)';
+                cell.style.borderColor = 'var(--color-brand)';
+            });
+            cell.addEventListener('mouseout', () => {
+                cell.style.transform = 'scale(1)';
+                cell.style.borderColor = 'var(--color-toolbar-border)';
+            });
+
+            cell.addEventListener('click', (e) => {
+                e.stopPropagation();
+                exec(activeColorCommand, color);
+                hideColorPicker();
+            });
+
+            colorPaletteGrid.appendChild(cell);
+        });
+    }
+
+    function showColorPicker(btn, command) {
+        if (!colorPickerPopover) return;
+        activeColorCommand = command;
+        if (colorPickerTitle) {
+            colorPickerTitle.textContent = command === 'foreColor' ? 'Text Color' : 'Highlight Color';
+        }
+
+        const rect = btn.getBoundingClientRect();
+        colorPickerPopover.style.display = 'flex';
+        colorPickerPopover.style.top = `${rect.bottom + window.scrollY + 6}px`;
+        colorPickerPopover.style.left = `${Math.min(rect.left + window.scrollX, window.innerWidth - 200)}px`;
+    }
+
+    function hideColorPicker() {
+        if (colorPickerPopover) colorPickerPopover.style.display = 'none';
+    }
+
+    if (btnCustomColor && nativeColorPicker) {
+        btnCustomColor.addEventListener('click', (e) => {
+            e.stopPropagation();
+            nativeColorPicker.click();
+        });
+
+        nativeColorPicker.addEventListener('change', (e) => {
+            const color = e.target.value;
+            exec(activeColorCommand, color);
+            hideColorPicker();
+        });
+    }
+
+    // --- Floating Link Tooltip Logic ---
+    function checkLinkTooltip(e) {
+        let node = e.target;
+        while (node && node !== container && !node.classList?.contains('page')) {
+            if (node.tagName === 'A') {
+                showLinkTooltip(node);
+                return;
+            }
+            node = node.parentNode;
+        }
+        hideLinkTooltip();
+    }
+
+    function showLinkTooltip(anchor) {
+        if (!linkTooltip || !linkTooltipUrl) return;
+        hoveredLink = anchor;
+        const href = anchor.getAttribute('href') || '#';
+        linkTooltipUrl.href = href;
+        linkTooltipUrl.textContent = href;
+
+        const rect = anchor.getBoundingClientRect();
+        linkTooltip.style.display = 'flex';
+        
+        const top = rect.bottom + window.scrollY + 6;
+        const left = rect.left + window.scrollX;
+        
+        linkTooltip.style.top = `${top}px`;
+        linkTooltip.style.left = `${left}px`;
+    }
+
+    function hideLinkTooltip() {
+        if (linkTooltip) linkTooltip.style.display = 'none';
+        hoveredLink = null;
+    }
+
+    if (linkTooltipEdit) {
+        linkTooltipEdit.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (hoveredLink) {
+                openLinkModal(hoveredLink);
+            }
+            hideLinkTooltip();
+        });
+    }
+
+    if (linkTooltipRemove) {
+        linkTooltipRemove.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (hoveredLink) {
+                const textNode = document.createTextNode(hoveredLink.textContent);
+                hoveredLink.replaceWith(textNode);
+                paginate();
+                saveContent();
+            }
+            hideLinkTooltip();
+        });
+    }
+
+    container.addEventListener('click', checkLinkTooltip);
+    container.addEventListener('keyup', checkLinkTooltip);
+
+    document.addEventListener('mousedown', (e) => {
+        if (linkTooltip && linkTooltip.style.display !== 'none') {
+            if (!linkTooltip.contains(e.target) && !container.contains(e.target)) {
+                hideLinkTooltip();
+            }
+        }
+        if (colorPickerPopover && colorPickerPopover.style.display !== 'none') {
+            if (!colorPickerPopover.contains(e.target)) {
+                hideColorPicker();
+            }
+        }
+    });
+
     const toolbarButtons = document.querySelectorAll('.tool-button[data-command]');
     const fontSelect = document.getElementById('fontSelect');
     const fontSizeSelect = document.getElementById('fontSizeSelect');
     const imageInput = document.getElementById('imageInput');
     const imageBtn = document.getElementById('imageBtn');
+    const pageBreakBtn = document.getElementById('pageBreakBtn');
     const exportPdfBtn = document.getElementById('exportPdfBtn');
 
     // --- Page helpers ---
@@ -33,7 +373,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const page = document.createElement('div');
         page.className = 'page';
         page.contentEditable = 'true';
-        page.spellcheck = true;
+        page.spellcheck = false;
+        if (currentDoc && currentDoc.fontFamily) {
+            page.style.fontFamily = currentDoc.fontFamily;
+        }
         container.appendChild(page);
         bindPageEvents(page);
         return page;
@@ -70,6 +413,20 @@ document.addEventListener('DOMContentLoaded', () => {
     function findOverflowIndex(container, page) {
         const children = Array.from(container.childNodes);
         if (children.length === 0) return -1;
+
+        // Check for manual page-break elements
+        for (let i = 0; i < children.length; i++) {
+            const child = children[i];
+            if (child.nodeType === Node.ELEMENT_NODE) {
+                if (child.classList.contains('page-break')) {
+                    if (i < children.length - 1) {
+                        return i + 1; // Start overflow at the next sibling
+                    }
+                } else if (child.querySelector('.page-break')) {
+                    return i; // Force split inside this child
+                }
+            }
+        }
 
         let low = 0;
         let high = children.length - 1;
@@ -395,6 +752,7 @@ document.addEventListener('DOMContentLoaded', () => {
         content: [],
         offlineUse: true,
         pageFormat: 'a4',
+        fontFamily: "'Noto Sans', 'Noto Sans Arabic', 'Noto Sans Devanagari', 'Noto Sans CJK TC', 'Noto Sans CJK SC', 'Noto Sans CJK JP', 'Noto Sans CJK KR', 'Noto Color Emoji', sans-serif",
         updatedAt: Date.now()
     };
 
@@ -448,6 +806,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     content: contentData,
                     offlineUse: true,
                     pageFormat: 'a4',
+                    fontFamily: "'Noto Sans', 'Noto Sans Arabic', 'Noto Sans Devanagari', 'Noto Sans CJK TC', 'Noto Sans CJK SC', 'Noto Sans CJK JP', 'Noto Sans CJK KR', 'Noto Color Emoji', sans-serif",
                     updatedAt: Date.now()
                 };
                 await saveDocument(docId, doc);
@@ -477,6 +836,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         applyPageFormat(doc.pageFormat || 'a4');
+        applyFontFamily(doc.fontFamily || "'Noto Sans', 'Noto Sans Arabic', 'Noto Sans Devanagari', 'Noto Sans CJK TC', 'Noto Sans CJK SC', 'Noto Sans CJK JP', 'Noto Sans CJK KR', 'Noto Color Emoji', sans-serif");
 
         let contentArray = [];
         if (doc.content) {
@@ -508,6 +868,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Toolbar Command Execution ---
     const exec = (command, value = null) => {
+        restoreSelection();
         const sel = window.getSelection();
         const pages = getPages();
 
@@ -591,11 +952,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (cmd === 'formatBlock') {
                 exec(cmd, btn.dataset.value);
             } else if (cmd === 'createLink') {
-                const url = prompt('Enter URL', 'https://');
-                if (url) exec(cmd, url);
+                openLinkModal();
             } else if (cmd === 'foreColor' || cmd === 'backColor') {
-                const color = prompt('Enter hex color (e.g., #ff0000)', '#');
-                if (color) exec(cmd, color);
+                showColorPicker(btn, cmd);
             } else {
                 exec(cmd);
             }
@@ -604,11 +963,57 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Font Family & Size ---
     fontSelect.addEventListener('change', () => {
-        exec('fontName', fontSelect.value);
+        const selectedValue = fontSelect.value;
+        const sel = window.getSelection();
+        if (sel.rangeCount > 0 && !sel.isCollapsed) {
+            exec('fontName', selectedValue);
+        } else {
+            applyFontFamily(selectedValue);
+            saveContent();
+        }
     });
     fontSizeSelect.addEventListener('change', () => {
         exec('fontSize', fontSizeSelect.value);
     });
+
+    const btnFontDecrease = document.getElementById('btn-font-decrease');
+    const btnFontIncrease = document.getElementById('btn-font-increase');
+
+    if (btnFontDecrease) {
+        btnFontDecrease.addEventListener('click', () => {
+            const currentSizeVal = document.queryCommandValue('fontSize');
+            let currentSize = parseInt(currentSizeVal) || 4;
+            if (!currentSizeVal && fontSizeSelect) {
+                currentSize = parseInt(fontSizeSelect.value) || 4;
+            }
+            if (currentSize < 1 || currentSize > 7) {
+                currentSize = 4;
+            }
+            const newSize = Math.max(1, currentSize - 1);
+            exec('fontSize', newSize);
+            if (fontSizeSelect) {
+                fontSizeSelect.value = newSize;
+            }
+        });
+    }
+
+    if (btnFontIncrease) {
+        btnFontIncrease.addEventListener('click', () => {
+            const currentSizeVal = document.queryCommandValue('fontSize');
+            let currentSize = parseInt(currentSizeVal) || 4;
+            if (!currentSizeVal && fontSizeSelect) {
+                currentSize = parseInt(fontSizeSelect.value) || 4;
+            }
+            if (currentSize < 1 || currentSize > 7) {
+                currentSize = 4;
+            }
+            const newSize = Math.min(7, currentSize + 1);
+            exec('fontSize', newSize);
+            if (fontSizeSelect) {
+                fontSizeSelect.value = newSize;
+            }
+        });
+    }
 
     // --- Image Insertion ---
     imageBtn.addEventListener('click', () => {
@@ -624,6 +1029,13 @@ document.addEventListener('DOMContentLoaded', () => {
         reader.readAsDataURL(file);
         imageInput.value = '';
     });
+
+    if (pageBreakBtn) {
+        pageBreakBtn.addEventListener('click', () => {
+            const pageBreakHtml = '<div class="page-break unbreakable" contenteditable="false"></div>';
+            exec('insertHTML', pageBreakHtml);
+        });
+    }
 
     // --- PDF Export ---
     // Dynamically load a script and return a promise
@@ -659,12 +1071,14 @@ document.addEventListener('DOMContentLoaded', () => {
         icon.textContent = 'hourglass_empty';
 
         try {
+            document.documentElement.setAttribute('data-theme-pdf', 'true');
             await ensurePdfLibs();
             await generatePdf();
         } catch (err) {
             console.error('PDF export failed:', err);
             alert('PDF export failed. Check the console for details.');
         } finally {
+            document.documentElement.removeAttribute('data-theme-pdf');
             exportPdfBtn.disabled = false;
             icon.textContent = origIcon;
         }
@@ -736,6 +1150,33 @@ document.addEventListener('DOMContentLoaded', () => {
         if (document.queryCommandState('bold')) document.querySelector('[data-command="bold"]')?.classList.add('active');
         if (document.queryCommandState('italic')) document.querySelector('[data-command="italic"]')?.classList.add('active');
         if (document.queryCommandState('underline')) document.querySelector('[data-command="underline"]')?.classList.add('active');
+
+        // Sync font family selection with current caret position
+        if (fontSelect) {
+            const currentFont = document.queryCommandValue('fontName');
+            if (currentFont) {
+                fontSelect.value = currentFont;
+                if (!fontSelect.value) {
+                    const primaryFont = currentFont.split(',')[0].replace(/['"]/g, '').trim().toLowerCase();
+                    for (let i = 0; i < fontSelect.options.length; i++) {
+                        const opt = fontSelect.options[i];
+                        const optPrimary = opt.value.split(',')[0].replace(/['"]/g, '').trim().toLowerCase();
+                        if (optPrimary === primaryFont) {
+                            fontSelect.selectedIndex = i;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sync font size selection with current caret position
+        if (fontSizeSelect) {
+            const currentSize = document.queryCommandValue('fontSize');
+            if (currentSize) {
+                fontSizeSelect.value = currentSize;
+            }
+        }
     }
 
     // --- Select All across pages ---
@@ -755,49 +1196,167 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // --- File, View & Format Dropdown Menus ---
-    const fileTrigger = document.getElementById('menu-file-trigger');
-    const fileDropdown = document.getElementById('file-dropdown');
-    const viewTrigger = document.getElementById('menu-view-trigger');
-    const viewDropdown = document.getElementById('view-dropdown');
-    const formatTrigger = document.getElementById('menu-format-trigger');
-    const formatDropdown = document.getElementById('format-dropdown');
+    // --- Dropdown Menus (Generic Toggle & Populating Submenus) ---
+    const dropdowns = [
+        { trigger: 'menu-file-trigger', menu: 'file-dropdown' },
+        { trigger: 'menu-edit-trigger', menu: 'edit-dropdown' },
+        { trigger: 'menu-view-trigger', menu: 'view-dropdown' },
+        { trigger: 'menu-insert-trigger', menu: 'insert-dropdown' },
+        { trigger: 'menu-format-trigger', menu: 'format-dropdown' }
+    ];
 
-    if (fileTrigger && fileDropdown) {
-        fileTrigger.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (viewDropdown) viewDropdown.style.display = 'none';
-            if (formatDropdown) formatDropdown.style.display = 'none';
-            const isVisible = fileDropdown.style.display === 'block';
-            fileDropdown.style.display = isVisible ? 'none' : 'block';
-        });
-    }
-
-    if (viewTrigger && viewDropdown) {
-        viewTrigger.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (fileDropdown) fileDropdown.style.display = 'none';
-            if (formatDropdown) formatDropdown.style.display = 'none';
-            const isVisible = viewDropdown.style.display === 'block';
-            viewDropdown.style.display = isVisible ? 'none' : 'block';
-        });
-    }
-
-    if (formatTrigger && formatDropdown) {
-        formatTrigger.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (fileDropdown) fileDropdown.style.display = 'none';
-            if (viewDropdown) viewDropdown.style.display = 'none';
-            const isVisible = formatDropdown.style.display === 'block';
-            formatDropdown.style.display = isVisible ? 'none' : 'block';
-        });
-    }
+    dropdowns.forEach(({ trigger: triggerId, menu: menuId }) => {
+        const trigger = document.getElementById(triggerId);
+        const menu = document.getElementById(menuId);
+        if (trigger && menu) {
+            trigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // Close all other dropdowns
+                dropdowns.forEach(d => {
+                    if (d.menu !== menuId) {
+                        const m = document.getElementById(d.menu);
+                        if (m) m.style.display = 'none';
+                    }
+                });
+                const isVisible = menu.style.display === 'block';
+                menu.style.display = isVisible ? 'none' : 'block';
+            });
+        }
+    });
 
     document.addEventListener('click', () => {
-        if (fileDropdown) fileDropdown.style.display = 'none';
-        if (viewDropdown) viewDropdown.style.display = 'none';
-        if (formatDropdown) formatDropdown.style.display = 'none';
+        dropdowns.forEach(d => {
+            const m = document.getElementById(d.menu);
+            if (m) m.style.display = 'none';
+        });
     });
+
+    // Helper to close all dropdowns
+    function closeAllDropdowns() {
+        dropdowns.forEach(d => {
+            const m = document.getElementById(d.menu);
+            if (m) m.style.display = 'none';
+        });
+    }
+
+    // --- Edit Dropdown Event Listeners ---
+    const editUndo = document.getElementById('menu-edit-undo');
+    const editRedo = document.getElementById('menu-edit-redo');
+    const editCut = document.getElementById('menu-edit-cut');
+    const editCopy = document.getElementById('menu-edit-copy');
+    const editPaste = document.getElementById('menu-edit-paste');
+    const editSelectAll = document.getElementById('menu-edit-selectall');
+
+    if (editUndo) {
+        editUndo.addEventListener('click', (e) => {
+            e.preventDefault();
+            exec('undo');
+            closeAllDropdowns();
+        });
+    }
+    if (editRedo) {
+        editRedo.addEventListener('click', (e) => {
+            e.preventDefault();
+            exec('redo');
+            closeAllDropdowns();
+        });
+    }
+
+    const tryClipboardCommand = (cmd) => {
+        try {
+            const success = document.execCommand(cmd);
+            if (!success) {
+                alert(`Browser blocked standard clipboard '${cmd}'. Please use keyboard shortcut (Ctrl+${cmd === 'cut' ? 'X' : cmd === 'copy' ? 'C' : 'V'}).`);
+            }
+        } catch (err) {
+            alert(`Browser blocked standard clipboard '${cmd}'. Please use keyboard shortcut (Ctrl+${cmd === 'cut' ? 'X' : cmd === 'copy' ? 'C' : 'V'}).`);
+        }
+    };
+
+    if (editCut) {
+        editCut.addEventListener('click', (e) => {
+            e.preventDefault();
+            tryClipboardCommand('cut');
+            closeAllDropdowns();
+        });
+    }
+    if (editCopy) {
+        editCopy.addEventListener('click', (e) => {
+            e.preventDefault();
+            tryClipboardCommand('copy');
+            closeAllDropdowns();
+        });
+    }
+    if (editPaste) {
+        editPaste.addEventListener('click', (e) => {
+            e.preventDefault();
+            tryClipboardCommand('paste');
+            closeAllDropdowns();
+        });
+    }
+    if (editSelectAll) {
+        editSelectAll.addEventListener('click', (e) => {
+            e.preventDefault();
+            const pages = getPages();
+            if (pages.length > 0) {
+                const first = pages[0];
+                const last = pages[pages.length - 1];
+                const sel = window.getSelection();
+                const range = document.createRange();
+                range.setStartBefore(first.firstChild || first);
+                range.setEndAfter(last.lastChild || last);
+                sel.removeAllRanges();
+                sel.addRange(range);
+            }
+            closeAllDropdowns();
+        });
+    }
+
+    // --- Insert Dropdown Event Listeners ---
+    const insertImage = document.getElementById('menu-insert-image');
+    const insertLink = document.getElementById('menu-insert-link');
+    const insertTable = document.getElementById('menu-insert-table');
+    const insertHr = document.getElementById('menu-insert-hr');
+    const insertPageBreak = document.getElementById('menu-insert-pagebreak');
+
+    if (insertImage) {
+        insertImage.addEventListener('click', (e) => {
+            e.preventDefault();
+            const imageInput = document.getElementById('imageInput');
+            if (imageInput) imageInput.click();
+            closeAllDropdowns();
+        });
+    }
+    if (insertLink) {
+        insertLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            openLinkModal();
+            closeAllDropdowns();
+        });
+    }
+    if (insertTable) {
+        insertTable.addEventListener('click', (e) => {
+            e.preventDefault();
+            openTableModal();
+            closeAllDropdowns();
+        });
+    }
+    if (insertHr) {
+        insertHr.addEventListener('click', (e) => {
+            e.preventDefault();
+            exec('insertHorizontalRule');
+            closeAllDropdowns();
+        });
+    }
+    if (insertPageBreak) {
+        insertPageBreak.addEventListener('click', (e) => {
+            e.preventDefault();
+            // Insert page-break divider element
+            const pageBreakHtml = '<div class="page-break unbreakable" contenteditable="false"></div>';
+            exec('insertHTML', pageBreakHtml);
+            closeAllDropdowns();
+        });
+    }
 
     // --- Page Formatting ---
     function applyPageFormat(format) {
@@ -818,6 +1377,28 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         currentDoc.pageFormat = format;
+    }
+
+    function applyFontFamily(fontFamily) {
+        const pages = getPages();
+        pages.forEach(page => {
+            page.style.fontFamily = fontFamily;
+        });
+        currentDoc.fontFamily = fontFamily;
+        if (fontSelect) {
+            fontSelect.value = fontFamily;
+            if (!fontSelect.value) {
+                const primaryFont = fontFamily.split(',')[0].replace(/['"]/g, '').trim().toLowerCase();
+                for (let i = 0; i < fontSelect.options.length; i++) {
+                    const opt = fontSelect.options[i];
+                    const optPrimary = opt.value.split(',')[0].replace(/['"]/g, '').trim().toLowerCase();
+                    if (optPrimary === primaryFont) {
+                        fontSelect.selectedIndex = i;
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     const formats = ['a4', 'letter', 'legal', 'a5'];
@@ -1205,6 +1786,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (syncSettings && syncSettings.enabled) {
             startSync(syncSettings);
         }
+        await initFonts(fontSelect);
         loadContent();
     })();
 });

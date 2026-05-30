@@ -1,7 +1,7 @@
 /* Light theme - Scriben */
 :root {
     --font-ui: 'Google Sans', sans-serif;
-    --font-content: 'Inter', sans-serif;
+    --font-content: 'Noto Sans', 'Noto Sans Arabic', 'Noto Sans Devanagari', 'Noto Sans CJK TC', 'Noto Sans CJK SC', 'Noto Sans CJK JP', 'Noto Sans CJK KR', 'Noto Color Emoji', sans-serif;
     --color-bg: #f8fafc;
     /* Slate 50 */
     --color-toolbar: rgba(255, 255, 255, 0.9);
@@ -119,7 +119,16 @@
 
 body {
     margin: 0;
-    font-family: var(--font-ui);
+    font-family: 
+        'Noto Sans',           /* Latin, Cyrillic, Greek */
+        'Noto Sans Arabic',    /* Arabic scripts */
+        'Noto Sans Devanagari',/* Hindi, Marathi, etc. */
+        'Noto Sans CJK TC',    /* Chinese Traditional */
+        'Noto Sans CJK SC',    /* Chinese Simplified */
+        'Noto Sans CJK JP',    /* Japanese */
+        'Noto Sans CJK KR',    /* Korean */
+        'Noto Color Emoji',    /* Emojis */
+        sans-serif;            /* System fallback */
     background: var(--color-bg);
     color: var(--color-text);
 }
@@ -359,6 +368,59 @@ select {
 
 .menu-trigger:hover {
     background-color: var(--color-hover);
+}
+
+/* Table layout styles */
+.page table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 14px;
+}
+
+.page th,
+.page td {
+    border: 1px solid var(--color-toolbar-border);
+    padding: 8px 12px;
+    text-align: left;
+    min-width: 50px;
+}
+
+.page th {
+    background-color: var(--color-hover);
+    font-weight: 600;
+}
+
+/* Page break visualization styling */
+.page-break {
+    display: block;
+    border-top: 2px dashed var(--color-brand) !important;
+    margin: 24px 0 !important;
+    position: relative;
+    user-select: none;
+    height: 0;
+}
+
+.page-break::before {
+    content: 'Page Break';
+    position: absolute;
+    top: -10px;
+    right: 16px;
+    background: var(--color-page-bg);
+    color: var(--color-brand);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 0 8px;
+    font-family: var(--font-ui);
+}
+
+/* Hide page break visualizations when exporting to PDF */
+:root[data-theme-pdf="true"] .page-break {
+    display: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    height: 0 !important;
 }
 
 

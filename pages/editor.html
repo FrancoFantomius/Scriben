@@ -3,7 +3,7 @@
 
 <head>
     <script>
-        (function() {
+        (function () {
             function applyTheme() {
                 const theme = localStorage.getItem('scriben-theme') || 'auto';
                 document.documentElement.setAttribute('data-theme', theme);
@@ -27,9 +27,9 @@
         rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
         rel="stylesheet" />
-    <link rel="stylesheet" href="css/editor.css" />
-    <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
-    <link rel="icon" href="icons/icon_dark.svg" type="image/svg+xml" media="(prefers-color-scheme: dark)" />
+    <link rel="stylesheet" href="/css/editor.css" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icons/icon_dark.svg" type="image/svg+xml" media="(prefers-color-scheme: dark)" />
     <!-- PouchDB -->
     <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
 </head>
@@ -56,10 +56,11 @@
             style="display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 8px 16px; border-bottom: 1px solid var(--color-toolbar-border);">
             <div style="display: flex; align-items: center; gap: 24px;">
                 <!-- Brand -->
-                <a href="./templates" style="display: flex; align-items: center; gap: 8px; text-decoration: none;">
-                    <span class="material-symbols-outlined" style="color: var(--color-brand); font-size: 24px; font-variation-settings: 'FILL' 1;">description</span>
+                <a href="/templates" style="display: flex; align-items: center; gap: 8px; text-decoration: none;">
+                    <span class="material-symbols-outlined"
+                        style="color: var(--color-brand); font-size: 24px; font-variation-settings: 'FILL' 1;">description</span>
                     <span
-                         style="font-size: 18px; font-weight: bold; color: var(--color-brand); font-family: 'Google Sans', sans-serif;">Scriben</span>
+                        style="font-size: 18px; font-weight: bold; color: var(--color-brand); font-family: 'Google Sans', sans-serif;">Scriben</span>
                 </a>
                 <!-- Document Title & Menu -->
                 <div style="display: flex; flex-direction: column;">
@@ -75,9 +76,10 @@
                         <div class="dropdown" style="position: relative; display: inline-block;">
                             <span id="menu-file-trigger" class="menu-trigger">File</span>
                             <div class="dropdown-menu" id="file-dropdown">
-                                <a href="./templates" class="dropdown-item">
+                                <a href="/templates" class="dropdown-item">
                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span class="material-symbols-outlined" style="font-size: 18px;">folder_open</span>
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">folder_open</span>
                                         All documents
                                     </div>
                                 </a>
@@ -108,15 +110,75 @@
                                 </a>
                             </div>
                         </div>
-                        <span class="menu-trigger">Edit</span>
-                        
+                        <!-- Edit Dropdown -->
+                        <div class="dropdown" style="position: relative; display: inline-block;">
+                            <span id="menu-edit-trigger" class="menu-trigger">Edit</span>
+                            <div class="dropdown-menu" id="edit-dropdown">
+                                <a href="#" id="menu-edit-undo" class="dropdown-item">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="material-symbols-outlined" style="font-size: 18px;">undo</span>
+                                        Undo
+                                    </div>
+                                    <span
+                                        style="font-size: 11px; color: var(--color-text-secondary); margin-left: 16px;">Ctrl+Z</span>
+                                </a>
+                                <a href="#" id="menu-edit-redo" class="dropdown-item">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="material-symbols-outlined" style="font-size: 18px;">redo</span>
+                                        Redo
+                                    </div>
+                                    <span
+                                        style="font-size: 11px; color: var(--color-text-secondary); margin-left: 16px;">Ctrl+Y</span>
+                                </a>
+                                <div style="height: 1px; background: var(--color-toolbar-border); margin: 4px 0;"></div>
+                                <a href="#" id="menu-edit-cut" class="dropdown-item">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">content_cut</span>
+                                        Cut
+                                    </div>
+                                    <span
+                                        style="font-size: 11px; color: var(--color-text-secondary); margin-left: 16px;">Ctrl+X</span>
+                                </a>
+                                <a href="#" id="menu-edit-copy" class="dropdown-item">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">content_copy</span>
+                                        Copy
+                                    </div>
+                                    <span
+                                        style="font-size: 11px; color: var(--color-text-secondary); margin-left: 16px;">Ctrl+C</span>
+                                </a>
+                                <a href="#" id="menu-edit-paste" class="dropdown-item">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">content_paste</span>
+                                        Paste
+                                    </div>
+                                    <span
+                                        style="font-size: 11px; color: var(--color-text-secondary); margin-left: 16px;">Ctrl+V</span>
+                                </a>
+                                <div style="height: 1px; background: var(--color-toolbar-border); margin: 4px 0;"></div>
+                                <a href="#" id="menu-edit-selectall" class="dropdown-item">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">select_all</span>
+                                        Select all
+                                    </div>
+                                    <span
+                                        style="font-size: 11px; color: var(--color-text-secondary); margin-left: 16px;">Ctrl+A</span>
+                                </a>
+                            </div>
+                        </div>
+
                         <!-- View Dropdown -->
                         <div class="dropdown" style="position: relative; display: inline-block;">
                             <span id="menu-view-trigger" class="menu-trigger">View</span>
                             <div class="dropdown-menu" id="view-dropdown">
                                 <a href="#" id="menu-theme-auto" class="dropdown-item">
                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span class="material-symbols-outlined" style="font-size: 18px;">settings_brightness</span>
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">settings_brightness</span>
                                         Sync with system
                                     </div>
                                     <span id="theme-auto-check" class="material-symbols-outlined"
@@ -125,7 +187,8 @@
                                 <div style="height: 1px; background: var(--color-toolbar-border); margin: 4px 0;"></div>
                                 <a href="#" id="menu-theme-light" class="dropdown-item">
                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span class="material-symbols-outlined" style="font-size: 18px;">light_mode</span>
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">light_mode</span>
                                         Light
                                     </div>
                                     <span id="theme-light-check" class="material-symbols-outlined"
@@ -134,7 +197,8 @@
                                 <div style="height: 1px; background: var(--color-toolbar-border); margin: 4px 0;"></div>
                                 <a href="#" id="menu-theme-dark" class="dropdown-item">
                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span class="material-symbols-outlined" style="font-size: 18px;">dark_mode</span>
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">dark_mode</span>
                                         Dark
                                     </div>
                                     <span id="theme-dark-check" class="material-symbols-outlined"
@@ -142,15 +206,55 @@
                                 </a>
                             </div>
                         </div>
-                        
-                        <span class="menu-trigger">Insert</span>
+
+                        <!-- Insert Dropdown -->
+                        <div class="dropdown" style="position: relative; display: inline-block;">
+                            <span id="menu-insert-trigger" class="menu-trigger">Insert</span>
+                            <div class="dropdown-menu" id="insert-dropdown">
+                                <a href="#" id="menu-insert-image" class="dropdown-item">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="material-symbols-outlined" style="font-size: 18px;">image</span>
+                                        Image
+                                    </div>
+                                </a>
+                                <a href="#" id="menu-insert-link" class="dropdown-item">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="material-symbols-outlined" style="font-size: 18px;">link</span>
+                                        Link
+                                    </div>
+                                </a>
+                                <a href="#" id="menu-insert-table" class="dropdown-item">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">table_chart</span>
+                                        Table
+                                    </div>
+                                </a>
+                                <a href="#" id="menu-insert-hr" class="dropdown-item">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">horizontal_rule</span>
+                                        Horizontal line
+                                    </div>
+                                </a>
+                                <div style="height: 1px; background: var(--color-toolbar-border); margin: 4px 0;"></div>
+                                <a href="#" id="menu-insert-pagebreak" class="dropdown-item">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">splitscreen</span>
+                                        Page break
+                                    </div>
+                                </a>
+                            </div>
+                        </div>
                         <!-- Format Dropdown -->
                         <div class="dropdown" style="position: relative; display: inline-block;">
                             <span id="menu-format-trigger" class="menu-trigger">Format</span>
                             <div class="dropdown-menu" id="format-dropdown">
                                 <a href="#" id="menu-format-a4" class="dropdown-item">
                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span class="material-symbols-outlined" style="font-size: 18px;">description</span>
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">description</span>
                                         A4 (210mm × 297mm)
                                     </div>
                                     <span id="format-a4-check" class="material-symbols-outlined"
@@ -159,7 +263,8 @@
                                 <div style="height: 1px; background: var(--color-toolbar-border); margin: 4px 0;"></div>
                                 <a href="#" id="menu-format-letter" class="dropdown-item">
                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span class="material-symbols-outlined" style="font-size: 18px;">description</span>
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">description</span>
                                         Letter (8.5" × 11")
                                     </div>
                                     <span id="format-letter-check" class="material-symbols-outlined"
@@ -168,7 +273,8 @@
                                 <div style="height: 1px; background: var(--color-toolbar-border); margin: 4px 0;"></div>
                                 <a href="#" id="menu-format-legal" class="dropdown-item">
                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span class="material-symbols-outlined" style="font-size: 18px;">description</span>
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">description</span>
                                         Legal (8.5" × 14")
                                     </div>
                                     <span id="format-legal-check" class="material-symbols-outlined"
@@ -177,7 +283,8 @@
                                 <div style="height: 1px; background: var(--color-toolbar-border); margin: 4px 0;"></div>
                                 <a href="#" id="menu-format-a5" class="dropdown-item">
                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span class="material-symbols-outlined" style="font-size: 18px;">description</span>
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">description</span>
                                         A5 (148mm × 210mm)
                                     </div>
                                     <span id="format-a5-check" class="material-symbols-outlined"
@@ -198,7 +305,8 @@
                 <!-- Login Button (shown when logged out) -->
                 <button id="btn-sync-login"
                     style="padding: 8px 16px; background: var(--color-brand); color: #ffffff; border: none; border-radius: 100px; font-size: 14px; font-weight: 500; cursor: pointer; font-family: 'Google Sans', sans-serif; transition: background-color 0.2s; display: none;"
-                    onmouseover="this.style.background='var(--color-brand-hover)'" onmouseout="this.style.background='var(--color-brand)'">
+                    onmouseover="this.style.background='var(--color-brand-hover)'"
+                    onmouseout="this.style.background='var(--color-brand)'">
                     Sign in
                 </button>
                 <!-- Profile Avatar/Icon Button (shown when logged in) -->
@@ -256,10 +364,12 @@
                     <!-- Footer links -->
                     <div
                         style="border-top: 1px solid var(--color-toolbar-border); width: 100%; margin-top: 20px; padding-top: 12px; display: flex; justify-content: center; gap: 12px; font-size: 12px; color: var(--color-text-secondary);">
-                        <a href="./privacy" target="_blank" style="color: var(--color-text-secondary); text-decoration: none;">Privacy
+                        <a href="/privacy" target="_blank"
+                            style="color: var(--color-text-secondary); text-decoration: none;">Privacy
                             Policy</a>
                         <span>•</span>
-                        <a href="./terms" target="_blank" style="color: var(--color-text-secondary); text-decoration: none;">Terms of
+                        <a href="/terms" target="_blank"
+                            style="color: var(--color-text-secondary); text-decoration: none;">Terms of
                             Service</a>
                     </div>
                 </div>
@@ -279,20 +389,22 @@
             <div style="width: 1px; height: 24px; background: var(--color-toolbar-border); margin: auto 4px;"></div>
 
             <select id="fontSelect" title="Content Font">
-                <option value="Inter" selected>Inter</option>
-                <option value="Arial">Arial</option>
-                <option value="Georgia">Georgia</option>
-                <option value="Times New Roman">Times New Roman</option>
-                <option value="Roboto">Roboto</option>
-                <option value="Calibri">Calibri</option>
+                <!-- Dynamically populated from fonts.json -->
             </select>
 
+            <button class="tool-button" id="btn-font-decrease" title="Decrease Font Size"><span
+                    class="material-symbols-outlined">text_decrease</span></button>
             <select id="fontSizeSelect" title="Font Size">
-                <option value="3">Small</option>
-                <option value="4" selected>Normal</option>
-                <option value="5">Subtitle</option>
-                <option value="6">Title</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4" selected>4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
             </select>
+            <button class="tool-button" id="btn-font-increase" title="Increase Font Size"><span
+                    class="material-symbols-outlined">text_increase</span></button>
 
             <div style="width: 1px; height: 24px; background: var(--color-toolbar-border); margin: auto 4px;"></div>
 
@@ -307,6 +419,8 @@
                     class="material-symbols-outlined">format_color_text</span></button>
             <button class="tool-button" data-command="backColor" title="Highlight"><span
                     class="material-symbols-outlined">format_color_fill</span></button>
+            <button class="tool-button" data-command="removeFormat" title="Clear Formatting"><span
+                    class="material-symbols-outlined">format_clear</span></button>
 
             <div style="width: 1px; height: 24px; background: var(--color-toolbar-border); margin: auto 4px;"></div>
 
@@ -316,6 +430,8 @@
                     class="material-symbols-outlined">format_align_center</span></button>
             <button class="tool-button" data-command="justifyRight" title="Align Right"><span
                     class="material-symbols-outlined">format_align_right</span></button>
+            <button class="tool-button" data-command="justifyFull" title="Justify"><span
+                    class="material-symbols-outlined">format_align_justify</span></button>
 
             <div style="width: 1px; height: 24px; background: var(--color-toolbar-border); margin: auto 4px;"></div>
 
@@ -331,12 +447,14 @@
             <input type="file" id="imageInput" accept="image/*" style="display:none;" />
             <button class="tool-button" id="imageBtn" title="Insert Image"><span
                     class="material-symbols-outlined">image</span></button>
+            <button class="tool-button" id="pageBreakBtn" title="Insert Page Break"><span
+                    class="material-symbols-outlined">splitscreen</span></button>
         </div>
     </header>
     <div id="pages-container">
-        <div class="page" contenteditable="true" spellcheck="true"></div>
+        <div class="page" contenteditable="true" spellcheck="false"></div>
     </div>
-    <script type="module" src="js/editor.js"></script>
+    <script type="module" src="/js/editor.js"></script>
 
     <!-- Settings & Sync Modal -->
     <div id="settings-modal" class="modal-overlay"
@@ -363,7 +481,8 @@
                 <div id="sync-credentials-container"
                     style="display: flex; flex-direction: column; gap: 12px; width: 100%;">
                     <div style="display: flex; flex-direction: column; gap: 4px; text-align: left;">
-                        <label for="sync-email" style="font-size: 12px; font-weight: 600; color: var(--color-text-secondary);">Filen
+                        <label for="sync-email"
+                            style="font-size: 12px; font-weight: 600; color: var(--color-text-secondary);">Filen
                             Email</label>
                         <input type="email" id="sync-email" placeholder="your-email@example.com"
                             style="width: 100%; padding: 10px 12px; border: 1px solid var(--color-toolbar-border); border-radius: 6px; font-size: 14px; outline: none; transition: border-color 0.2s; font-family: 'Inter', sans-serif; background: var(--color-input-bg); color: var(--color-text);"
@@ -372,7 +491,8 @@
                     </div>
 
                     <div style="display: flex; flex-direction: column; gap: 4px; text-align: left;">
-                        <label for="sync-password" style="font-size: 12px; font-weight: 600; color: var(--color-text-secondary);">Filen
+                        <label for="sync-password"
+                            style="font-size: 12px; font-weight: 600; color: var(--color-text-secondary);">Filen
                             Password</label>
                         <input type="password" id="sync-password" placeholder="Enter your password"
                             style="width: 100%; padding: 10px 12px; border: 1px solid var(--color-toolbar-border); border-radius: 6px; font-size: 14px; outline: none; transition: border-color 0.2s; font-family: 'Inter', sans-serif; background: var(--color-input-bg); color: var(--color-text);"
@@ -383,7 +503,8 @@
 
                     <div style="display: flex; flex-direction: column; gap: 4px; text-align: left;">
                         <label for="sync-twofactor"
-                            style="font-size: 12px; font-weight: 600; color: var(--color-text-secondary);">Two-Factor Auth Code
+                            style="font-size: 12px; font-weight: 600; color: var(--color-text-secondary);">Two-Factor
+                            Auth Code
                             (Optional)</label>
                         <input type="text" id="sync-twofactor" placeholder="6-digit code if enabled"
                             style="width: 100%; padding: 10px 12px; border: 1px solid var(--color-toolbar-border); border-radius: 6px; font-size: 14px; outline: none; transition: border-color 0.2s; font-family: 'Inter', sans-serif; background: var(--color-input-bg); color: var(--color-text);"
@@ -401,7 +522,8 @@
                 <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px; width: 100%;">
                     <button id="btn-save-sync"
                         style="width: 100%; padding: 10px; background: var(--color-brand); color: #ffffff; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 0.2s; font-family: 'Inter', sans-serif;"
-                        onmouseover="this.style.background='var(--color-brand-hover)'" onmouseout="this.style.background='var(--color-brand)'">
+                        onmouseover="this.style.background='var(--color-brand-hover)'"
+                        onmouseout="this.style.background='var(--color-brand)'">
                         Save & Enable Sync
                     </button>
                     <button id="btn-save-sync-cancel"
@@ -413,6 +535,147 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- Insert Link Modal -->
+    <div id="link-modal" class="modal-overlay"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(8px); z-index: 10000; justify-content: center; align-items: center; transition: opacity 0.3s ease;">
+        <div class="modal-card"
+            style="background: var(--color-dropdown-bg); border: 1px solid var(--color-toolbar-border); border-radius: 8px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); width: 100%; max-width: 400px; padding: 24px; display: flex; flex-direction: column; gap: 20px; font-family: 'Inter', sans-serif;">
+            <div class="settings-header"
+                style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--color-toolbar-border); padding-bottom: 12px;">
+                <h2
+                    style="font-family: 'Google Sans', sans-serif; font-size: 18px; font-weight: 600; color: var(--color-text); margin: 0; display: flex; align-items: center; gap: 8px;">
+                    <span class="material-symbols-outlined" style="color: var(--color-brand);">link</span>
+                    Insert link
+                </h2>
+            </div>
+            <div class="settings-body" style="display: flex; flex-direction: column; gap: 16px;">
+                <div style="display: flex; flex-direction: column; gap: 4px; text-align: left;">
+                    <label for="link-text"
+                        style="font-size: 12px; font-weight: 600; color: var(--color-text-secondary);">Text to
+                        display</label>
+                    <input type="text" id="link-text" placeholder="Link Text"
+                        style="width: 100%; padding: 10px 12px; border: 1px solid var(--color-toolbar-border); border-radius: 6px; font-size: 14px; outline: none; transition: border-color 0.2s; font-family: 'Inter', sans-serif; background: var(--color-input-bg); color: var(--color-text);"
+                        onfocus="this.style.borderColor='var(--color-brand)'"
+                        onblur="this.style.borderColor='var(--color-toolbar-border)'">
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 4px; text-align: left;">
+                    <label for="link-url"
+                        style="font-size: 12px; font-weight: 600; color: var(--color-text-secondary);">URL</label>
+                    <input type="url" id="link-url" placeholder="https://example.com"
+                        style="width: 100%; padding: 10px 12px; border: 1px solid var(--color-toolbar-border); border-radius: 6px; font-size: 14px; outline: none; transition: border-color 0.2s; font-family: 'Inter', sans-serif; background: var(--color-input-bg); color: var(--color-text);"
+                        onfocus="this.style.borderColor='var(--color-brand)'"
+                        onblur="this.style.borderColor='var(--color-toolbar-border)'">
+                </div>
+                <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 8px;">
+                    <button id="btn-link-cancel"
+                        style="padding: 8px 16px; background: transparent; border: 1px solid var(--color-toolbar-border); color: var(--color-text-secondary); border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 0.2s; font-family: 'Inter', sans-serif;"
+                        onmouseover="this.style.background='var(--color-hover)'"
+                        onmouseout="this.style.background='transparent'">
+                        Cancel
+                    </button>
+                    <button id="btn-link-insert"
+                        style="padding: 8px 20px; background: var(--color-brand); color: #ffffff; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 0.2s; font-family: 'Inter', sans-serif;"
+                        onmouseover="this.style.background='var(--color-brand-hover)'"
+                        onmouseout="this.style.background='var(--color-brand)'">
+                        Apply
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Insert Table Modal -->
+    <div id="table-modal" class="modal-overlay"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(8px); z-index: 10000; justify-content: center; align-items: center; transition: opacity 0.3s ease;">
+        <div class="modal-card"
+            style="background: var(--color-dropdown-bg); border: 1px solid var(--color-toolbar-border); border-radius: 8px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); width: 100%; max-width: 320px; padding: 24px; display: flex; flex-direction: column; gap: 20px; font-family: 'Inter', sans-serif;">
+            <div class="settings-header"
+                style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--color-toolbar-border); padding-bottom: 12px;">
+                <h2
+                    style="font-family: 'Google Sans', sans-serif; font-size: 18px; font-weight: 600; color: var(--color-text); margin: 0; display: flex; align-items: center; gap: 8px;">
+                    <span class="material-symbols-outlined" style="color: var(--color-brand);">table_chart</span>
+                    Insert table
+                </h2>
+            </div>
+            <div class="settings-body" style="display: flex; flex-direction: column; gap: 16px;">
+                <div style="display: flex; gap: 16px; width: 100%;">
+                    <div style="display: flex; flex-direction: column; gap: 4px; flex: 1; text-align: left;">
+                        <label for="table-rows"
+                            style="font-size: 12px; font-weight: 600; color: var(--color-text-secondary);">Rows</label>
+                        <input type="number" id="table-rows" value="3" min="1" max="10"
+                            style="width: 100%; padding: 10px 12px; border: 1px solid var(--color-toolbar-border); border-radius: 6px; font-size: 14px; outline: none; transition: border-color 0.2s; font-family: 'Inter', sans-serif; background: var(--color-input-bg); color: var(--color-text);"
+                            onfocus="this.style.borderColor='var(--color-brand)'"
+                            onblur="this.style.borderColor='var(--color-toolbar-border)'">
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 4px; flex: 1; text-align: left;">
+                        <label for="table-cols"
+                            style="font-size: 12px; font-weight: 600; color: var(--color-text-secondary);">Columns</label>
+                        <input type="number" id="table-cols" value="3" min="1" max="10"
+                            style="width: 100%; padding: 10px 12px; border: 1px solid var(--color-toolbar-border); border-radius: 6px; font-size: 14px; outline: none; transition: border-color 0.2s; font-family: 'Inter', sans-serif; background: var(--color-input-bg); color: var(--color-text);"
+                            onfocus="this.style.borderColor='var(--color-brand)'"
+                            onblur="this.style.borderColor='var(--color-toolbar-border)'">
+                    </div>
+                </div>
+                <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 8px;">
+                    <button id="btn-table-cancel"
+                        style="padding: 8px 16px; background: transparent; border: 1px solid var(--color-toolbar-border); color: var(--color-text-secondary); border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 0.2s; font-family: 'Inter', sans-serif;"
+                        onmouseover="this.style.background='var(--color-hover)'"
+                        onmouseout="this.style.background='transparent'">
+                        Cancel
+                    </button>
+                    <button id="btn-table-insert"
+                        style="padding: 8px 20px; background: var(--color-brand); color: #ffffff; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color 0.2s; font-family: 'Inter', sans-serif;"
+                        onmouseover="this.style.background='var(--color-brand-hover)'"
+                        onmouseout="this.style.background='var(--color-brand)'">
+                        Insert
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Link Floating Tooltip -->
+    <div id="link-tooltip"
+        style="display: none; position: absolute; background: var(--color-dropdown-bg); border: 1px solid var(--color-toolbar-border); border-radius: 6px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); padding: 6px 12px; z-index: 9999; font-family: 'Inter', sans-serif; font-size: 13px; align-items: center; gap: 8px; border-sizing: border-box;">
+        <span class="material-symbols-outlined" style="font-size: 18px; color: var(--color-brand);">link</span>
+        <a id="link-tooltip-url" href="#" target="_blank"
+            style="color: var(--color-brand); text-decoration: none; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500;">https://example.com</a>
+        <div style="width: 1px; height: 16px; background: var(--color-toolbar-border);"></div>
+        <button id="link-tooltip-edit"
+            style="background: transparent; border: none; padding: 2px; cursor: pointer; color: var(--color-text-secondary); display: flex; align-items: center; border-radius: 4px;"
+            title="Edit link" onmouseover="this.style.backgroundColor='var(--color-hover)'"
+            onmouseout="this.style.backgroundColor='transparent'">
+            <span class="material-symbols-outlined" style="font-size: 18px;">edit</span>
+        </button>
+        <button id="link-tooltip-remove"
+            style="background: transparent; border: none; padding: 2px; cursor: pointer; color: var(--color-danger); display: flex; align-items: center; border-radius: 4px;"
+            title="Remove link" onmouseover="this.style.backgroundColor='var(--color-hover)'"
+            onmouseout="this.style.backgroundColor='transparent'">
+            <span class="material-symbols-outlined" style="font-size: 18px;">link_off</span>
+        </button>
+    </div>
+
+    <!-- Custom Color Picker Popover -->
+    <div id="color-picker-popover"
+        style="display: none; position: absolute; background: var(--color-dropdown-bg); border: 1px solid var(--color-toolbar-border); border-radius: 8px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18); padding: 12px; z-index: 10000; width: 180px; font-family: 'Inter', sans-serif; flex-direction: column; gap: 8px; box-sizing: border-box;">
+        <div style="font-size: 11px; font-weight: 600; color: var(--color-text-secondary); margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.5px;"
+            id="color-picker-title">Text Color</div>
+        <!-- Curated Palette Grid -->
+        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;" id="color-palette-grid">
+            <!-- Programmatically populated -->
+        </div>
+        <div style="height: 1px; background: var(--color-toolbar-border); margin: 4px 0;"></div>
+        <!-- Custom Color Button -->
+        <button id="btn-custom-color"
+            style="display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 6px 12px; background: transparent; border: 1px solid var(--color-toolbar-border); border-radius: 6px; font-size: 12px; font-weight: 600; color: var(--color-text); cursor: pointer; transition: background-color 0.2s;"
+            onmouseover="this.style.backgroundColor='var(--color-hover)'"
+            onmouseout="this.style.backgroundColor='transparent'">
+            <span class="material-symbols-outlined" style="font-size: 16px;">colorize</span>
+            Custom color
+        </button>
+        <input type="color" id="native-color-picker" style="display: none;">
     </div>
 </body>
 
