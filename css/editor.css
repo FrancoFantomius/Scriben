@@ -120,6 +120,7 @@
 body {
     margin: 0;
     font-family: 
+        'Google Sans',
         'Noto Sans',           /* Latin, Cyrillic, Greek */
         'Noto Sans Arabic',    /* Arabic scripts */
         'Noto Sans Devanagari',/* Hindi, Marathi, etc. */
@@ -332,7 +333,7 @@ select {
     min-width: 180px;
     z-index: 1000;
     padding: 4px 0;
-    font-family: 'Inter', sans-serif;
+    font-family: 'Google Sans', sans-serif;
 }
 
 .dropdown-item {
@@ -421,6 +422,80 @@ select {
     padding: 0 !important;
     border: none !important;
     height: 0 !important;
+}
+
+/* Dark Mode overrides for hardcoded/inline light-theme colors in documents */
+:root[data-theme="dark"] .page [style*="color: #202124" i],
+:root[data-theme="dark"] .page [style*="color:#202124" i],
+:root[data-theme="dark"] .page [style*="color: rgb(32, 33, 36)" i],
+:root[data-theme="dark"] .page [style*="color:rgb(32,33,36)" i],
+:root[data-theme="dark"] .page [style*="color: #000000" i],
+:root[data-theme="dark"] .page [style*="color:#000000" i],
+:root[data-theme="dark"] .page [style*="color: #000" i],
+:root[data-theme="dark"] .page [style*="color:#000" i],
+:root[data-theme="dark"] .page [style*="color: rgb(0, 0, 0)" i],
+:root[data-theme="dark"] .page [style*="color:rgb(0,0,0)" i],
+:root[data-theme="dark"] .page font[color="#000000" i],
+:root[data-theme="dark"] .page font[color="#000" i],
+:root[data-theme="dark"] .page font[color="black" i] {
+    color: var(--color-page-text) !important;
+}
+
+:root[data-theme="dark"] .page [style*="color: #5f6368" i],
+:root[data-theme="dark"] .page [style*="color:#5f6368" i],
+:root[data-theme="dark"] .page [style*="color: rgb(95, 99, 104)" i],
+:root[data-theme="dark"] .page [style*="color:rgb(95,99,104)" i] {
+    color: var(--color-text-secondary) !important;
+}
+
+:root[data-theme="dark"] .page [style*="background: #dadce0" i],
+:root[data-theme="dark"] .page [style*="background:#dadce0" i],
+:root[data-theme="dark"] .page [style*="background-color: #dadce0" i],
+:root[data-theme="dark"] .page [style*="background-color:#dadce0" i] {
+    background-color: var(--color-toolbar-border) !important;
+}
+
+:root[data-theme="dark"] .page [style*="border-color: #dadce0" i],
+:root[data-theme="dark"] .page [style*="border-color:#dadce0" i] {
+    border-color: var(--color-toolbar-border) !important;
+}
+
+/* Repeat for prefers-color-scheme: dark */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .page [style*="color: #202124" i],
+    :root:not([data-theme="light"]) .page [style*="color:#202124" i],
+    :root:not([data-theme="light"]) .page [style*="color: rgb(32, 33, 36)" i],
+    :root:not([data-theme="light"]) .page [style*="color:rgb(32,33,36)" i],
+    :root:not([data-theme="light"]) .page [style*="color: #000000" i],
+    :root:not([data-theme="light"]) .page [style*="color:#000000" i],
+    :root:not([data-theme="light"]) .page [style*="color: #000" i],
+    :root:not([data-theme="light"]) .page [style*="color:#000" i],
+    :root:not([data-theme="light"]) .page [style*="color: rgb(0, 0, 0)" i],
+    :root:not([data-theme="light"]) .page [style*="color:rgb(0,0,0)" i],
+    :root:not([data-theme="light"]) .page font[color="#000000" i],
+    :root:not([data-theme="light"]) .page font[color="#000" i],
+    :root:not([data-theme="light"]) .page font[color="black" i] {
+        color: var(--color-page-text) !important;
+    }
+
+    :root:not([data-theme="light"]) .page [style*="color: #5f6368" i],
+    :root:not([data-theme="light"]) .page [style*="color:#5f6368" i],
+    :root:not([data-theme="light"]) .page [style*="color: rgb(95, 99, 104)" i],
+    :root:not([data-theme="light"]) .page [style*="color:rgb(95,99,104)" i] {
+        color: var(--color-text-secondary) !important;
+    }
+
+    :root:not([data-theme="light"]) .page [style*="background: #dadce0" i],
+    :root:not([data-theme="light"]) .page [style*="background:#dadce0" i],
+    :root:not([data-theme="light"]) .page [style*="background-color: #dadce0" i],
+    :root:not([data-theme="light"]) .page [style*="background-color:#dadce0" i] {
+        background-color: var(--color-toolbar-border) !important;
+    }
+
+    :root:not([data-theme="light"]) .page [style*="border-color: #dadce0" i],
+    :root:not([data-theme="light"]) .page [style*="border-color:#dadce0" i] {
+        border-color: var(--color-toolbar-border) !important;
+    }
 }
 
 
