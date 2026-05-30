@@ -1,6 +1,6 @@
 {
   "name": "scriben",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Secure document editor with Filen sync integration.",
   "license": "AGPL-3.0-only",
   "type": "module",
