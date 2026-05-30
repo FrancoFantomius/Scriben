@@ -20,6 +20,22 @@ export default defineConfig({
       },
       protocolImports: true,
     }),
+    {
+      name: 'clean-urls-middleware',
+      configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+          if (req.url) {
+            const url = new URL(req.url, 'http://localhost');
+            const pathname = url.pathname;
+            const lastSegment = pathname.split('/').pop() || '';
+            if (pathname !== '/' && !lastSegment.includes('.') && !pathname.startsWith('/@')) {
+              req.url = pathname + '.html' + url.search;
+            }
+          }
+          next();
+        });
+      }
+    }
   ],
   server: {
     port: 5173,

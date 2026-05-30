@@ -182,7 +182,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 `;
                 await saveDocument(newId, docObj);
-                window.location.href = `./editor.html?id=${newId}`;
+                window.location.href = `./editor?id=${newId}`;
             } catch (err) {
                 console.error("Failed to create document from template:", err);
                 alert("Could not create document. Please try again.");
@@ -252,7 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
             row.innerHTML = `
                 <div class="col-name-wrapper">
                     <span class="material-symbols-outlined doc-icon">description</span>
-                    <a class="doc-title" href="./editor.html?id=${doc.id}">${escapeHTML(doc.title)}</a>
+                    <a class="doc-title" href="./editor?id=${doc.id}">${escapeHTML(doc.title)}</a>
                 </div>
                 <div class="col-date">${formatDate(doc.updatedAt)}</div>
                 <div class="col-offline">
@@ -284,7 +284,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (e.target.closest('.col-actions') || e.target.closest('.col-offline') || e.target.closest('.doc-title')) {
                     return;
                 }
-                window.location.href = `./editor.html?id=${doc.id}`;
+                window.location.href = `./editor?id=${doc.id}`;
             });
 
             // Bind Offline checkbox toggle
