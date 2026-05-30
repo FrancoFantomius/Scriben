@@ -40,6 +40,7 @@ let onChangeCallback = null;
 let onSyncStatusCallback = null;
 let syncPromise = Promise.resolve();
 let syncInterval = null;
+let initPromise = null;
 
 /**
  * Register active document ID to prevent purging its content when offlineUse is false
@@ -117,41 +118,51 @@ export async function saveSyncSettings(settings) {
  * @param {Object} docObj - Document fields (title, content pages array, etc.)
  */
 export async function saveDocument(id, docObj) {
-  try {
-    let existingDoc = null;
+  let attempts = 3;
+  while (attempts > 0) {
     try {
-      existingDoc = await db.get(id);
+      let existingDoc = null;
+      try {
+        existingDoc = await db.get(id);
+      } catch (err) {
+        // Document is new
+      }
+      
+      const doc = {
+        _id: id,
+        type: 'document',
+        updatedAt: docObj.updatedAt || Date.now(),
+        title: docObj.title || 'Untitled document',
+        content: docObj.content || [],
+        offlineUse: docObj.offlineUse !== undefined ? docObj.offlineUse : true,
+        pageFormat: docObj.pageFormat || 'a4',
+        createdAt: docObj.createdAt || Date.now()
+      };
+      
+      if (existingDoc) {
+        doc._rev = existingDoc._rev;
+        // Preserve sync-related metadata
+        if (existingDoc.lastSynced) doc.lastSynced = existingDoc.lastSynced;
+        if (existingDoc.remoteLastModified) doc.remoteLastModified = existingDoc.remoteLastModified;
+        if (existingDoc.synced) doc.synced = existingDoc.synced;
+      }
+      
+      const response = await db.put(doc);
+      
+      // Trigger sync replication
+      triggerSyncReconciliation();
+      
+      return response;
     } catch (err) {
-      // Document is new
+      if ((err.name === 'conflict' || err.status === 409) && attempts > 1) {
+        attempts--;
+        // Wait a tiny bit and retry with the new revision
+        await new Promise(resolve => setTimeout(resolve, 50));
+        continue;
+      }
+      console.error("[DB] Failed to save document:", err);
+      throw err;
     }
-    
-    const doc = {
-      _id: id,
-      type: 'document',
-      updatedAt: docObj.updatedAt || Date.now(),
-      title: docObj.title || 'Untitled document',
-      content: docObj.content || [],
-      offlineUse: docObj.offlineUse !== undefined ? docObj.offlineUse : true,
-      createdAt: docObj.createdAt || Date.now()
-    };
-    
-    if (existingDoc) {
-      doc._rev = existingDoc._rev;
-      // Preserve sync-related metadata
-      if (existingDoc.lastSynced) doc.lastSynced = existingDoc.lastSynced;
-      if (existingDoc.remoteLastModified) doc.remoteLastModified = existingDoc.remoteLastModified;
-      if (existingDoc.synced) doc.synced = existingDoc.synced;
-    }
-    
-    const response = await db.put(doc);
-    
-    // Trigger sync replication
-    triggerSyncReconciliation();
-    
-    return response;
-  } catch (err) {
-    console.error("[DB] Failed to save document:", err);
-    throw err;
   }
 }
 
@@ -162,6 +173,53 @@ export async function saveDocument(id, docObj) {
  */
 export async function getDocument(id) {
   return await db.get(id);
+}
+
+/**
+ * Fetch a document's content from Filen cloud when the local copy has been
+ * pruned (offlineUse: false with empty content array).
+ * Returns the updated local document with content restored, or null if
+ * the document could not be fetched from the cloud.
+ * @param {string} id - Document ID
+ * @returns {Promise<Object|null>}
+ */
+export async function fetchDocumentContentFromCloud(id) {
+  if (initPromise) {
+    try {
+      await initPromise;
+    } catch (err) {
+      console.warn("[Sync] Error waiting for sync initialization:", err);
+    }
+  }
+
+  if (!filenClient || !filenClient.isLoggedIn()) {
+    return null;
+  }
+
+  const filePath = `/Scriben/documents/${id}.json`;
+  try {
+    const content = await filenClient.fs().readFile({ path: filePath });
+    const payload = JSON.parse(content.toString('utf-8'));
+
+    // Merge remote content into the local PouchDB record
+    let localDoc;
+    try {
+      localDoc = await db.get(id);
+    } catch (err) {
+      return null;
+    }
+
+    localDoc.content = payload.content || [];
+    localDoc.title = payload.title || localDoc.title;
+    localDoc.updatedAt = payload.updatedAt || localDoc.updatedAt;
+    await db.put(localDoc);
+
+    // Re-fetch to get the updated _rev
+    return await db.get(id);
+  } catch (err) {
+    console.warn(`[Sync] Could not fetch document ${id} from cloud:`, err);
+    return null;
+  }
 }
 
 /**
@@ -228,12 +286,13 @@ export function startSync(settings) {
 
   if (!settings.enabled || (!hasCredentials && !hasSession)) {
     if (onSyncStatusCallback) onSyncStatusCallback('offline');
+    initPromise = null;
     return;
   }
 
   if (onSyncStatusCallback) onSyncStatusCallback('syncing');
 
-  initFilenAndSync(settings);
+  initPromise = initFilenAndSync(settings);
 }
 
 /**
@@ -245,6 +304,7 @@ export function stopSync() {
     syncInterval = null;
   }
   filenClient = null;
+  initPromise = null;
   if (onSyncStatusCallback) onSyncStatusCallback('offline');
 }
 

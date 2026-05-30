@@ -1,5 +1,5 @@
 // Scriben WYSIWYG Editor
-// A4 pagination, toolbar commands, font switching,
+// Multi-format pagination, toolbar commands, font switching,
 // image insertion, PDF export, PouchDB database sync.
 
 import { 
@@ -9,6 +9,7 @@ import {
     saveSyncSettings,
     saveDocument,
     getDocument,
+    fetchDocumentContentFromCloud,
     startSync,
     stopSync,
     destroyDatabase
@@ -22,10 +23,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const imageInput = document.getElementById('imageInput');
     const imageBtn = document.getElementById('imageBtn');
     const exportPdfBtn = document.getElementById('exportPdfBtn');
-
-    // A4 content height in px (297mm - 2 × 25.4mm margins = 246.2mm)
-    // 1mm ≈ 3.7795px at 96dpi → 246.2mm ≈ 930px
-    const PAGE_CONTENT_HEIGHT = 930;
 
     // --- Page helpers ---
     function getPages() {
@@ -62,146 +59,253 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Overflow detection & pagination ---
-    function checkOverflow() {
+    // Temporarily allow overflow on a page so scrollHeight reflects real content height
+    function measureOverflow(page) {
+        page.style.overflow = 'auto';
+        const overflows = page.scrollHeight > page.clientHeight;
+        page.style.overflow = '';
+        return overflows;
+    }
+
+    function findOverflowIndex(container, page) {
+        const children = Array.from(container.childNodes);
+        if (children.length === 0) return -1;
+
+        let low = 0;
+        let high = children.length - 1;
+        let result = children.length; // Default to length (overflow occurs after these children or elsewhere)
+
+        while (low <= high) {
+            const mid = Math.floor((low + high) / 2);
+
+            // Temporarily remove children from mid + 1 to the end
+            const detached = [];
+            for (let i = mid + 1; i < children.length; i++) {
+                detached.push({ node: children[i], nextSibling: children[i].nextSibling });
+                children[i].remove();
+            }
+
+            const overflows = measureOverflow(page);
+
+            // Re-attach detached children in reverse order to preserve original structure
+            for (let i = detached.length - 1; i >= 0; i--) {
+                const { node, nextSibling } = detached[i];
+                container.insertBefore(node, nextSibling);
+            }
+
+            if (overflows) {
+                // If it overflows with children 0..mid, the first overflow child is at or before mid
+                result = mid;
+                high = mid - 1;
+            } else {
+                // If it doesn't overflow with children 0..mid, the first overflow child is after mid
+                low = mid + 1;
+            }
+        }
+
+        return result;
+    }
+
+    function splitNode(node, page, nextContainer, isFirstOnPage) {
+        if (node.nodeType === Node.TEXT_NODE) {
+            const text = node.textContent;
+            let low = 0;
+            let high = text.length;
+            let splitIdx = text.length;
+
+            while (low <= high) {
+                const mid = Math.floor((low + high) / 2);
+                node.textContent = text.slice(0, mid);
+
+                const overflows = measureOverflow(page);
+                if (overflows) {
+                    splitIdx = mid;
+                    high = mid - 1;
+                } else {
+                    low = mid + 1;
+                }
+            }
+
+            // Restore text and split
+            if (splitIdx === 0) {
+                if (!isFirstOnPage) {
+                    node.textContent = text;
+                    nextContainer.insertBefore(node, nextContainer.firstChild);
+                } else {
+                    // Safety: keep at least 1 character to avoid empty/collapsing node
+                    const safeSplit = Math.max(1, splitIdx);
+                    if (safeSplit < text.length) {
+                        node.textContent = text.slice(0, safeSplit);
+                        const nextTextNode = document.createTextNode(text.slice(safeSplit));
+                        nextContainer.insertBefore(nextTextNode, nextContainer.firstChild);
+                    } else {
+                        node.textContent = text;
+                    }
+                }
+            } else if (splitIdx < text.length) {
+                let adjustedSplitIdx = splitIdx;
+                const lastSpace = text.lastIndexOf(' ', splitIdx);
+                if (lastSpace > 0 && (splitIdx - lastSpace) < 20) {
+                    adjustedSplitIdx = lastSpace + 1;
+                }
+
+                if (adjustedSplitIdx === 0 && !isFirstOnPage) {
+                    node.textContent = text;
+                    nextContainer.insertBefore(node, nextContainer.firstChild);
+                } else {
+                    const safeSplit = (adjustedSplitIdx === 0 && isFirstOnPage) ? 1 : adjustedSplitIdx;
+                    node.textContent = text.slice(0, safeSplit);
+                    const nextText = text.slice(safeSplit);
+                    if (nextText.length > 0) {
+                        const nextTextNode = document.createTextNode(nextText);
+                        nextContainer.insertBefore(nextTextNode, nextContainer.firstChild);
+                    }
+                }
+            } else {
+                node.textContent = text;
+            }
+            return;
+        }
+
+        if (node.nodeType === Node.ELEMENT_NODE) {
+            const unbreakableTags = ['IMG', 'BR', 'HR', 'TABLE', 'IFRAME', 'VIDEO', 'AUDIO'];
+            if (unbreakableTags.includes(node.tagName) || node.classList.contains('unbreakable')) {
+                if (!isFirstOnPage) {
+                    nextContainer.insertBefore(node, nextContainer.firstChild);
+                }
+                return;
+            }
+
+            const overflowIdx = findOverflowIndex(node, page);
+            if (overflowIdx === -1) {
+                return; // Everything fits inside this element
+            }
+
+            const children = Array.from(node.childNodes);
+
+            // Re-use or create split container
+            let clone = nextContainer.firstChild;
+            if (!clone || clone.tagName !== node.tagName || !clone.hasAttribute('data-split')) {
+                clone = node.cloneNode(false);
+                clone.setAttribute('data-split', 'true');
+                nextContainer.insertBefore(clone, nextContainer.firstChild);
+            }
+
+            // Move trailing children to the clone
+            const insertBeforeRef = clone.firstChild;
+            for (let i = overflowIdx + 1; i < children.length; i++) {
+                clone.insertBefore(children[i], insertBeforeRef);
+            }
+
+            // Recursively split the boundary child
+            const boundaryChild = children[overflowIdx];
+            if (boundaryChild) {
+                const isBoundaryFirst = (overflowIdx === 0 && isFirstOnPage);
+                splitNode(boundaryChild, page, clone, isBoundaryFirst);
+            }
+
+            // Clean up empty nodes
+            if (node.childNodes.length === 0) {
+                node.remove();
+            }
+            if (clone.childNodes.length === 0) {
+                clone.remove();
+            }
+        }
+    }
+
+    function splitPage(page, next) {
+        const overflowIdx = findOverflowIndex(page, page);
+        if (overflowIdx === -1) return;
+
+        const children = Array.from(page.childNodes);
+
+        // Move all children after the overflow point to the next page
+        for (let i = overflowIdx + 1; i < children.length; i++) {
+            next.insertBefore(children[i], next.firstChild);
+        }
+
+        // Split the boundary child
+        const boundaryChild = children[overflowIdx];
+        if (boundaryChild) {
+            const isFirst = (overflowIdx === 0);
+            splitNode(boundaryChild, page, next, isFirst);
+        }
+    }
+
+    function cleanupEmptyPages() {
         const pages = getPages();
+        for (let i = pages.length - 1; i > 0; i--) {
+            const text = pages[i].textContent.replace(/\s/g, '');
+            const hasImages = pages[i].querySelector('img, table, iframe, video, audio') !== null;
+            if (text === '' && !hasImages) {
+                pages[i].remove();
+            } else {
+                break;
+            }
+        }
+    }
+
+    function paginate() {
+        const pages = getPages();
+
         for (let i = 0; i < pages.length; i++) {
             const page = pages[i];
 
-            let next = pages[i + 1];
-            if (!next && page.scrollHeight > page.clientHeight) {
-                next = createPage();
-                pages.push(next);
-            }
-
-            while (page.scrollHeight > page.clientHeight && page.childNodes.length > 0) {
-                const lastChild = page.lastChild;
-
-                if (lastChild.nodeType === Node.TEXT_NODE) {
-                    const words = lastChild.textContent.split(/(\s+)/);
-                    const movedText = [];
-                    while (words.length > 0 && page.scrollHeight > page.clientHeight) {
-                        movedText.unshift(words.pop());
-                        lastChild.textContent = words.join('');
-                    }
-                    if (movedText.length > 0) {
-                        const newTextNode = document.createTextNode(movedText.join(''));
-                        next.insertBefore(newTextNode, next.firstChild);
-                    }
-                    if (lastChild.textContent === '') lastChild.remove();
-                    continue;
+            if (measureOverflow(page)) {
+                let next = pages[i + 1];
+                if (!next) {
+                    next = createPage();
+                    pages.push(next);
                 }
+                splitPage(page, next);
+            } else {
+                let next = pages[i + 1];
+                if (next) {
+                    let pulledAny = false;
 
-                if (lastChild.nodeType === Node.ELEMENT_NODE) {
-                    // Do not split unbreakable elements
-                    if (['IMG', 'BR', 'HR', 'TABLE'].includes(lastChild.tagName)) {
-                        next.insertBefore(lastChild, next.firstChild);
-                        continue;
-                    }
+                    while (next.childNodes.length > 0 && !measureOverflow(page)) {
+                        const firstChild = next.firstChild;
+                        const lastChild = page.lastChild;
 
-                    let targetNode = next.firstChild;
-                    // Only reuse targetNode if it's specifically marked as a split continuation
-                    if (!targetNode || targetNode.tagName !== lastChild.tagName || !targetNode.hasAttribute('data-split')) {
-                        targetNode = lastChild.cloneNode(false);
-                        targetNode.setAttribute('data-split', 'true');
-                        next.insertBefore(targetNode, next.firstChild);
-                    }
+                        // Only merge if both are elements of the same tag and it was originally split
+                        if (lastChild && lastChild.nodeType === Node.ELEMENT_NODE &&
+                            firstChild.nodeType === Node.ELEMENT_NODE &&
+                            lastChild.tagName === firstChild.tagName &&
+                            firstChild.hasAttribute('data-split') &&
+                            !firstChild.classList.contains('unbreakable') &&
+                            !lastChild.classList.contains('unbreakable')) {
 
-                    let splitHappened = false;
-                    while (lastChild.childNodes.length > 0 && page.scrollHeight > page.clientHeight) {
-                        const innerLast = lastChild.lastChild;
-
-                        if (innerLast.nodeType === Node.TEXT_NODE) {
-                            const words = innerLast.textContent.split(/(\s+)/);
-                            const movedText = [];
-
-                            while (words.length > 0 && page.scrollHeight > page.clientHeight) {
-                                movedText.unshift(words.pop());
-                                innerLast.textContent = words.join('');
+                            while (firstChild.firstChild) {
+                                lastChild.appendChild(firstChild.firstChild);
                             }
-
-                            if (movedText.length > 0) {
-                                const newTextNode = document.createTextNode(movedText.join(''));
-                                targetNode.insertBefore(newTextNode, targetNode.firstChild);
-                                splitHappened = true;
-                            }
-                            if (innerLast.textContent === '') innerLast.remove();
+                            firstChild.remove();
+                            lastChild.normalize();
                         } else {
-                            targetNode.insertBefore(innerLast, targetNode.firstChild);
-                            splitHappened = true;
+                            page.appendChild(firstChild);
                         }
+                        pulledAny = true;
                     }
 
-                    if (lastChild.childNodes.length === 0) {
-                        lastChild.remove();
-                    } else if (!splitHappened) {
-                        // Could not split further (e.g. single giant word)
-                        next.insertBefore(lastChild, next.firstChild);
-                        // If we moved the whole thing, remove the empty targetNode we created
-                        if (targetNode.childNodes.length === 0) {
-                            targetNode.remove();
-                        }
+                    if (pulledAny && measureOverflow(page)) {
+                        splitPage(page, next);
                     }
-                } else {
-                    next.insertBefore(lastChild, next.firstChild);
                 }
             }
         }
-        // Clean up empty trailing pages (keep at least one)
-        const updated = getPages();
-        for (let i = updated.length - 1; i > 0; i--) {
-            if (updated[i].innerHTML.trim() === '') {
-                updated[i].remove();
-            } else {
-                break;
-            }
-        }
-    }
 
-    // --- Pull content back up when deleting ---
-    function checkUnderflow() {
-        const pages = getPages();
-        for (let i = 0; i < pages.length - 1; i++) {
-            const page = pages[i];
-            const next = pages[i + 1];
-            // Try pulling content from the next page into this page
-            while (next.firstChild && page.scrollHeight <= page.clientHeight) {
-                const child = next.firstChild;
-
-                // Check if we can merge it with page.lastChild
-                const lastChild = page.lastChild;
-                if (lastChild && lastChild.nodeType === Node.ELEMENT_NODE &&
-                    child.nodeType === Node.ELEMENT_NODE &&
-                    lastChild.tagName === child.tagName) {
-
-                    // Merge children
-                    while (child.firstChild) {
-                        lastChild.appendChild(child.firstChild);
-                    }
-                    child.remove();
-
-                    // Normalize to combine adjacent text nodes
-                    lastChild.normalize();
-                } else {
-                    page.appendChild(child);
-                }
-
-                if (page.scrollHeight > page.clientHeight) {
-                    break;
-                }
-            }
-        }
-        // Clean up empty trailing pages
-        const updated = getPages();
-        for (let i = updated.length - 1; i > 0; i--) {
-            if (updated[i].innerHTML.trim() === '') {
-                updated[i].remove();
-            } else {
-                break;
-            }
-        }
+        cleanupEmptyPages();
     }
 
     // --- Bind events on each page ---
+    function debounce(func, wait) {
+        let timeout;
+        return function(...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+
     function saveCursor() {
         const sel = window.getSelection();
         if (!sel.rangeCount) return null;
@@ -227,10 +331,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function bindPageEvents(page) {
         page.addEventListener('input', () => {
             const marker = saveCursor();
-            checkOverflow();
-            checkUnderflow();
+            paginate();
             restoreCursor(marker);
-            saveContent();
+            debouncedSaveContent();
             updateActiveStates();
         });
         page.addEventListener('keyup', updateActiveStates);
@@ -249,7 +352,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     page.remove();
                     const prev = pages[idx - 1];
                     placeCursorAtEnd(prev);
-                    saveContent();
+                    debouncedSaveContent();
                 }
             }
         });
@@ -291,6 +394,7 @@ document.addEventListener('DOMContentLoaded', () => {
         title: 'Untitled document',
         content: [],
         offlineUse: true,
+        pageFormat: 'a4',
         updatedAt: Date.now()
     };
 
@@ -310,6 +414,8 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error("Failed to save content to PouchDB:", err);
         }
     }
+
+    const debouncedSaveContent = debounce(saveContent, 1000);
 
     async function loadContent() {
         try {
@@ -341,9 +447,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     title: 'Untitled document',
                     content: contentData,
                     offlineUse: true,
+                    pageFormat: 'a4',
                     updatedAt: Date.now()
                 };
                 await saveDocument(docId, doc);
+            }
+
+            // If the document was synced but its content was pruned (offlineUse: false),
+            // lazily fetch the content from Filen cloud before rendering.
+            const contentIsEmpty = !doc.content || !Array.isArray(doc.content) || doc.content.length === 0;
+            if (contentIsEmpty && doc.synced) {
+                const cloudDoc = await fetchDocumentContentFromCloud(docId);
+                if (cloudDoc) {
+                    doc = cloudDoc;
+                }
             }
 
             currentDoc = doc;
@@ -359,9 +476,20 @@ document.addEventListener('DOMContentLoaded', () => {
             titleInput.value = doc.title || 'Untitled document';
         }
 
-        if (doc.content && Array.isArray(doc.content) && doc.content.length > 0) {
+        applyPageFormat(doc.pageFormat || 'a4');
+
+        let contentArray = [];
+        if (doc.content) {
+            if (Array.isArray(doc.content)) {
+                contentArray = doc.content;
+            } else if (typeof doc.content === 'string') {
+                contentArray = [doc.content];
+            }
+        }
+
+        if (contentArray.length > 0) {
             container.innerHTML = '';
-            doc.content.forEach(html => {
+            contentArray.forEach(html => {
                 const page = createPage();
                 page.innerHTML = html;
             });
@@ -371,6 +499,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         updateOfflineMenuCheckmark(doc.offlineUse !== false);
+
+        // Paginate on load to ensure content fits the current format and splits correctly
+        requestAnimationFrame(() => {
+            paginate();
+        });
     }
 
     // --- Toolbar Command Execution ---
@@ -447,8 +580,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateActiveStates();
         // Re-check pagination after formatting changes
         requestAnimationFrame(() => {
-            checkOverflow();
-            checkUnderflow();
+            paginate();
             saveContent();
         });
     };
@@ -540,14 +672,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function generatePdf() {
         const { jsPDF } = window.jspdf;
-        // A4 dimensions in mm
-        const pageWidthMM = 210;
-        const pageHeightMM = 297;
+        const format = currentDoc.pageFormat || 'a4';
+
+        let pageWidthMM = 210;
+        let pageHeightMM = 297;
+
+        if (format === 'a5') {
+            pageWidthMM = 148;
+            pageHeightMM = 210;
+        } else if (format === 'letter') {
+            pageWidthMM = 215.9;
+            pageHeightMM = 279.4;
+        } else if (format === 'legal') {
+            pageWidthMM = 215.9;
+            pageHeightMM = 355.6;
+        }
 
         const pdf = new jsPDF({
             orientation: 'portrait',
             unit: 'mm',
-            format: 'a4',
+            format: format,
             compress: true
         });
 
@@ -563,7 +707,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 allowTaint: true,
                 backgroundColor: '#ffffff',
                 logging: false,
-                // Capture the full A4 page including padding
                 width: page.offsetWidth,
                 height: page.offsetHeight,
                 windowWidth: page.offsetWidth,
@@ -572,9 +715,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const imgData = canvas.toDataURL('image/png');
 
-            // Scale the canvas image to fill the A4 page exactly
             if (i > 0) {
-                pdf.addPage('a4', 'portrait');
+                pdf.addPage(format, 'portrait');
             }
 
             pdf.addImage(imgData, 'PNG', 0, 0, pageWidthMM, pageHeightMM);
@@ -613,21 +755,83 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // --- File Dropdown Menu ---
+    // --- File, View & Format Dropdown Menus ---
     const fileTrigger = document.getElementById('menu-file-trigger');
     const fileDropdown = document.getElementById('file-dropdown');
+    const viewTrigger = document.getElementById('menu-view-trigger');
+    const viewDropdown = document.getElementById('view-dropdown');
+    const formatTrigger = document.getElementById('menu-format-trigger');
+    const formatDropdown = document.getElementById('format-dropdown');
 
     if (fileTrigger && fileDropdown) {
         fileTrigger.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (viewDropdown) viewDropdown.style.display = 'none';
+            if (formatDropdown) formatDropdown.style.display = 'none';
             const isVisible = fileDropdown.style.display === 'block';
             fileDropdown.style.display = isVisible ? 'none' : 'block';
         });
+    }
 
-        document.addEventListener('click', () => {
-            fileDropdown.style.display = 'none';
+    if (viewTrigger && viewDropdown) {
+        viewTrigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (fileDropdown) fileDropdown.style.display = 'none';
+            if (formatDropdown) formatDropdown.style.display = 'none';
+            const isVisible = viewDropdown.style.display === 'block';
+            viewDropdown.style.display = isVisible ? 'none' : 'block';
         });
     }
+
+    if (formatTrigger && formatDropdown) {
+        formatTrigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (fileDropdown) fileDropdown.style.display = 'none';
+            if (viewDropdown) viewDropdown.style.display = 'none';
+            const isVisible = formatDropdown.style.display === 'block';
+            formatDropdown.style.display = isVisible ? 'none' : 'block';
+        });
+    }
+
+    document.addEventListener('click', () => {
+        if (fileDropdown) fileDropdown.style.display = 'none';
+        if (viewDropdown) viewDropdown.style.display = 'none';
+        if (formatDropdown) formatDropdown.style.display = 'none';
+    });
+
+    // --- Page Formatting ---
+    function applyPageFormat(format) {
+        const validFormats = ['a4', 'a5', 'letter', 'legal'];
+        if (!validFormats.includes(format)) format = 'a4';
+
+        const container = document.getElementById('pages-container');
+        if (container) {
+            validFormats.forEach(f => container.classList.remove(`format-${f}`));
+            container.classList.add(`format-${format}`);
+        }
+
+        validFormats.forEach(f => {
+            const check = document.getElementById(`format-${f}-check`);
+            if (check) {
+                check.style.display = (f === format) ? 'block' : 'none';
+            }
+        });
+
+        currentDoc.pageFormat = format;
+    }
+
+    const formats = ['a4', 'letter', 'legal', 'a5'];
+    formats.forEach(f => {
+        const btn = document.getElementById(`menu-format-${f}`);
+        if (btn) {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                applyPageFormat(f);
+                paginate();
+                saveContent();
+            });
+        }
+    });
 
     function updateOfflineMenuCheckmark(isOffline) {
         const check = document.getElementById('offline-check');
@@ -670,7 +874,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const documentTitleInput = document.getElementById('document-title');
     if (documentTitleInput) {
         documentTitleInput.addEventListener('input', () => {
-            saveContent();
+            debouncedSaveContent();
         });
     }
 
@@ -992,19 +1196,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    registerCallbacks(handleDBChange, handleSyncStatusChange);
+    registerCallbacks(null, handleSyncStatusChange);
 
-    // Load active document content
-    loadContent();
-
-    // Start sync immediately if enabled in settings
+    // --- Initialize ---
     (async () => {
         const syncSettings = await getSyncSettings();
-        // Update header buttons on startup
         await loadSyncModalState();
         if (syncSettings && syncSettings.enabled) {
             startSync(syncSettings);
         }
+        loadContent();
     })();
 });
 

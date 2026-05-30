@@ -2,13 +2,28 @@
 <html lang="en">
 
 <head>
+    <script>
+        (function () {
+            function applyTheme() {
+                const theme = localStorage.getItem('scriben-theme') || 'auto';
+                document.documentElement.setAttribute('data-theme', theme);
+            }
+            applyTheme();
+            window.addEventListener('storage', (e) => {
+                if (e.key === 'scriben-theme') {
+                    applyTheme();
+                }
+            });
+        })();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Scriben - A modern, fast, and vibrant web-based document editor.">
     <title>Scriben</title>
 
     <!-- Favicon -->
-    <link rel="shortcut icon" href="./icons/HF-Logo.ico" type="image/x-icon">
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+    <link rel="icon" href="./icons/icon_dark.svg" type="image/svg+xml" media="(prefers-color-scheme: dark)">
 
     <!-- Local Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
@@ -37,18 +52,18 @@
             <!-- Hidden on mobile, handled via CSS -->
             <a href="#">Description</a>
             <a href="#">Features</a>
-            <a href="#">Templates</a>
+            <a href="./templates.html">Templates</a>
         </nav>
         <nav class="header-nav">
             <a href="#">Description</a>
             <a href="#features">Features</a>
-            <a href="#">Templates</a>
+            <a href="./templates.html">Templates</a>
         </nav>
 
         <div class="header-actions">
             <a href="#" style="color: var(--text-secondary); text-decoration: none; display: none;">Sign In</a>
             <!-- Can hide on small screens -->
-            <a href="./editor.html" class="btn-primary">Get Started</a>
+            <a href="./templates.html" class="btn-primary">Get Started</a>
         </div>
     </header>
 
@@ -61,7 +76,7 @@
                 productivity.
             </p>
             <div class="action-container">
-                <a href="./editor.html" class="btn-primary">Get Started</a>
+                <a href="./templates.html" class="btn-primary">Get Started</a>
                 <a href="#" class="btn-secondary">Discover Features</a>
             </div>
         </section>
