@@ -31,7 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const searchClearBtn = document.getElementById('search-clear-btn');
     const documentsList = document.getElementById('documents-list');
     const syncBannerNotice = document.getElementById('sync-banner-notice');
-    
+
     // Auth selectors
     const btnSyncLogin = document.getElementById('btn-sync-login');
     const btnSyncProfile = document.getElementById('btn-sync-profile');
@@ -122,7 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
             localStorage.setItem('scriben-theme', newTheme);
             document.documentElement.setAttribute('data-theme', newTheme);
             updateThemeToggleUI();
-            
+
             // Re-emit so other tabs receive it
             window.dispatchEvent(new StorageEvent('storage', {
                 key: 'scriben-theme',
@@ -196,10 +196,10 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadAndRenderDocuments() {
         try {
             allDocs = await loadAllDocumentHeaders();
-            
+
             // Sort by updatedAt descending
             allDocs.sort((a, b) => b.updatedAt - a.updatedAt);
-            
+
             renderDocumentsList();
         } catch (err) {
             console.error("Failed to load documents:", err);
@@ -310,7 +310,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.preventDefault();
                 e.stopPropagation();
                 const targetId = renameBtn.dataset.id;
-                
+
                 // Hide popover
                 const popover = document.getElementById(`popover-${targetId}`);
                 if (popover) popover.classList.remove('show');
@@ -318,7 +318,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const currentDocObj = allDocs.find(d => d.id === targetId);
                 const oldTitle = currentDocObj ? currentDocObj.title : '';
                 const newTitle = prompt("Rename document:", oldTitle);
-                
+
                 if (newTitle !== null && newTitle.trim() !== '') {
                     try {
                         const fullDoc = await getDocument(targetId);
@@ -380,18 +380,18 @@ document.addEventListener('DOMContentLoaded', () => {
             e.stopPropagation();
             const docId = moreActionsBtn.dataset.id;
             const popover = document.getElementById(`popover-${docId}`);
-            
+
             // Close all other popovers
             document.querySelectorAll('.row-action-popover').forEach(p => {
                 if (p !== popover) p.classList.remove('show');
             });
-            
+
             if (popover) {
                 popover.classList.toggle('show');
             }
             return;
         }
-        
+
         // Click outside closes popover
         if (!e.target.closest('.row-action-popover')) {
             document.querySelectorAll('.row-action-popover').forEach(p => p.classList.remove('show'));
@@ -430,7 +430,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function loadSyncModalState() {
         const settings = await getSyncSettings();
-        
+
         inputEmail.value = settings.email || '';
         inputPassword.value = '';
         input2FA.value = '';
@@ -454,7 +454,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isSyncActive) {
                 btnLogin.style.display = 'none';
                 btnProfile.style.display = 'flex';
-                
+
                 const profileIdentity = settings.username || settings.email || '';
                 const initialLetter = profileIdentity.trim().charAt(0).toUpperCase();
 
@@ -463,7 +463,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     imgAvatar.style.display = 'block';
                     if (headerProfileLetter) headerProfileLetter.style.display = 'none';
                     if (iconAvatar) iconAvatar.style.display = 'none';
-                    
+
                     imgAvatar.onerror = () => {
                         imgAvatar.style.display = 'none';
                         if (headerProfileLetter && initialLetter) {
