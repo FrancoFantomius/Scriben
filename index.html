@@ -5,7 +5,7 @@
     <script>
         (function () {
             if (localStorage.getItem('scriben-has-used') === 'true') {
-                window.location.replace('/templates');
+                window.location.replace('./templates.html');
                 return;
             }
 
@@ -57,18 +57,18 @@
             <!-- Hidden on mobile, handled via CSS -->
             <a href="#">Description</a>
             <a href="#">Features</a>
-            <a href="/templates">Templates</a>
+            <a href="./templates.html">Templates</a>
         </nav>
         <nav class="header-nav">
             <a href="#">Description</a>
             <a href="#features">Features</a>
-            <a href="/templates">Templates</a>
+            <a href="./templates.html">Templates</a>
         </nav>
 
         <div class="header-actions">
             <a href="#" style="color: var(--text-secondary); text-decoration: none; display: none;">Sign In</a>
             <!-- Can hide on small screens -->
-            <a href="/templates" class="btn-primary">Get Started</a>
+            <a href="./templates.html" class="btn-primary">Get Started</a>
         </div>
     </header>
 
@@ -81,7 +81,7 @@
                 productivity.
             </p>
             <div class="action-container">
-                <a href="/templates" class="btn-primary">Get Started</a>
+                <a href="./templates.html" class="btn-primary">Get Started</a>
                 <a href="#" class="btn-secondary">Discover Features</a>
             </div>
         </section>
@@ -148,8 +148,8 @@
                 style="font-weight: bold; font-size: 1.2rem; color: var(--text-primary); margin-right: 1rem;">Scriben</span>
         </div>
         <nav class="footer-nav">
-            <a href="/privacy">Privacy Policy</a>
-            <a href="/terms">Terms of Service</a>
+            <a href="./privacy.html">Privacy Policy</a>
+            <a href="./terms.html">Terms of Service</a>
         </nav>
     </footer>
 </body>
