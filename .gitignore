@@ -13,6 +13,7 @@ jspm_packages/
 
 # Compiler outputs
 *.local
+dist/
 
 # Editor directories and files
 .vscode/*
