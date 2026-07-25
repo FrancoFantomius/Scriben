@@ -127,17 +127,36 @@ export async function saveDocument(id, docObj) {
       } catch (err) {
         // Document is new
       }
-      
+
+      let author = docObj.author;
+      if (!author) {
+        if (existingDoc && existingDoc.author) {
+          author = existingDoc.author;
+        } else {
+          try {
+            const settings = await getSyncSettings();
+            author = settings.userId || settings.username || settings.email || 'Anonymous';
+          } catch (e) {
+            author = 'Anonymous';
+          }
+        }
+      }
+
       const doc = {
         _id: id,
         type: 'document',
         updatedAt: docObj.updatedAt || Date.now(),
         title: docObj.title || 'Untitled document',
+        author: author,
         content: docObj.content || [],
         offlineUse: docObj.offlineUse !== undefined ? docObj.offlineUse : true,
         pageFormat: docObj.pageFormat || 'a4',
         createdAt: docObj.createdAt || Date.now()
       };
+
+      if (docObj.fontFamily) {
+        doc.fontFamily = docObj.fontFamily;
+      }
       
       if (existingDoc) {
         doc._rev = existingDoc._rev;
@@ -196,9 +215,17 @@ export async function fetchDocumentContentFromCloud(id) {
     return null;
   }
 
-  const filePath = `/Scriben/documents/${id}.json`;
+  let filePath = `/Apps/Scriben/documents/${id}.json`;
   try {
-    const content = await filenClient.fs().readFile({ path: filePath });
+    let content;
+    try {
+      content = await filenClient.fs().readFile({ path: filePath });
+    } catch (err) {
+      // Fallback to legacy path if not found in /Apps/Scriben/documents
+      filePath = `/Scriben/documents/${id}.json`;
+      content = await filenClient.fs().readFile({ path: filePath });
+    }
+
     const payload = JSON.parse(content.toString('utf-8'));
 
     // Merge remote content into the local PouchDB record
@@ -211,6 +238,7 @@ export async function fetchDocumentContentFromCloud(id) {
 
     localDoc.content = payload.content || [];
     localDoc.title = payload.title || localDoc.title;
+    if (payload.author) localDoc.author = payload.author;
     localDoc.updatedAt = payload.updatedAt || localDoc.updatedAt;
     await db.put(localDoc);
 
@@ -240,6 +268,7 @@ export async function loadAllDocumentHeaders() {
         id: doc._id,
         _rev: doc._rev,
         title: doc.title || 'Untitled document',
+        author: doc.author || 'Anonymous',
         offlineUse: doc.offlineUse !== undefined ? doc.offlineUse : true,
         createdAt: doc.createdAt || Date.now(),
         updatedAt: doc.updatedAt || Date.now(),
@@ -458,10 +487,13 @@ async function initFilenAndSync(settings) {
     
     // Ensure cloud folder hierarchy
     try {
-      await filenClient.fs().mkdir({ path: '/Scriben' });
+      await filenClient.fs().mkdir({ path: '/Apps' });
     } catch (e) {}
     try {
-      await filenClient.fs().mkdir({ path: '/Scriben/documents' });
+      await filenClient.fs().mkdir({ path: '/Apps/Scriben' });
+    } catch (e) {}
+    try {
+      await filenClient.fs().mkdir({ path: '/Apps/Scriben/documents' });
     } catch (e) {}
 
     // Run initial sync
@@ -492,73 +524,39 @@ async function runSync() {
     const deletedQueue = await getDeletedDocsQueue();
     for (const docId of deletedQueue) {
       try {
-        const filePath = `/Scriben/documents/${docId}.json`;
-        await filenClient.fs().rm({ path: filePath, permanent: true });
+        const filePath = `/Apps/Scriben/documents/${docId}.json`;
+        await filenClient.fs().rm({ path: filePath, permanent: true }).catch(() => {});
+        await filenClient.fs().rm({ path: `/Scriben/documents/${docId}.json`, permanent: true }).catch(() => {});
         await removeFromDeletedDocsQueue(docId);
       } catch (err) {
         console.error(`[Sync] Failed to remote delete document ${docId}:`, err);
-        throw err; // Pause current sync replication cycle
       }
     }
 
-    // 2. Load all local documents
-    const localResult = await db.allDocs({
-      include_docs: true,
-      startkey: 'doc_',
-      endkey: 'doc_\ufff0'
-    });
-    const localDocs = localResult.rows.map(row => row.doc);
-
-    // 3. Read remote files
-    let remoteFiles = [];
-    try {
-      remoteFiles = await filenClient.fs().readdir({ path: '/Scriben/documents' });
-    } catch (err) {
-      if (err.message && err.message.includes('not found')) {
-        remoteFiles = [];
-      } else {
-        throw err;
-      }
-    }
-
-    // Build remote mapping
-    const remoteMap = new Map();
-    for (const filename of remoteFiles) {
-      if (!filename.endsWith('.json')) continue;
-      const docId = filename.substring(0, filename.length - 5);
-      const filePath = `/Scriben/documents/${filename}`;
-      try {
-        const stats = await filenClient.fs().stat({ path: filePath });
-        remoteMap.set(docId, { filename, filePath, stats });
-      } catch (err) {
-        console.error(`[Sync] Stat failed on remote file ${filePath}:`, err);
-      }
-    }
-
-    const localMap = new Map(localDocs.map(doc => [doc._id, doc]));
-
-    // Reusable Upload Helper
+    // Helper: Upload single doc file to /Apps/Scriben/documents
     const uploadDocToFilen = async (localDoc) => {
-      // Re-fetch local doc in case it has been changed while we were reading directory
       const refreshedDoc = await db.get(localDoc._id);
+      const authorId = refreshedDoc.author || settings.userId || settings.username || settings.email || 'Anonymous';
 
       const payload = {
         _id: refreshedDoc._id,
         type: refreshedDoc.type,
         updatedAt: refreshedDoc.updatedAt,
         title: refreshedDoc.title,
+        author: authorId,
         content: refreshedDoc.content || [],
         offlineUse: refreshedDoc.offlineUse !== undefined ? refreshedDoc.offlineUse : true,
-        createdAt: refreshedDoc.createdAt
+        pageFormat: refreshedDoc.pageFormat || 'a4',
+        createdAt: refreshedDoc.createdAt || Date.now()
       };
 
       const parentUUID = await filenClient.fs().pathToItemUUID({
-        path: '/Scriben/documents',
+        path: '/Apps/Scriben/documents',
         type: 'directory'
       });
 
       if (!parentUUID) {
-        throw new Error("Could not find /Scriben/documents directory UUID");
+        throw new Error("Could not find /Apps/Scriben/documents directory UUID");
       }
 
       const jsonStr = JSON.stringify(payload);
@@ -574,104 +572,194 @@ async function runSync() {
         name: `${refreshedDoc._id}.json`
       });
 
-      // Update sync markers in PouchDB
       const docToUpdate = await db.get(refreshedDoc._id);
+      docToUpdate.author = authorId;
       docToUpdate.lastSynced = Date.now();
       docToUpdate.remoteLastModified = item.lastModified;
       docToUpdate.synced = true;
       await db.put(docToUpdate);
     };
 
-    // Reusable Download Helper
-    const downloadDocFromFilen = async (filePath, mtimeMs) => {
-      const content = await filenClient.fs().readFile({ path: filePath });
-      const payload = JSON.parse(content.toString('utf-8'));
-      
-      const docId = payload._id;
-      let existingDoc = null;
-      try {
-        existingDoc = await db.get(docId);
-      } catch (err) {
-        // Doc is new locally
-      }
+    // Helper: Save index file /Apps/Scriben/index.json
+    const uploadIndexToFilen = async (indexDocsArray) => {
+      const parentUUID = await filenClient.fs().pathToItemUUID({
+        path: '/Apps/Scriben',
+        type: 'directory'
+      });
+      if (!parentUUID) return;
 
-      // Check if this document is NOT active and has offlineUse: false
-      const shouldKeepContent = (docId === activeDocId) || (payload.offlineUse !== false);
-      
-      const doc = {
-        _id: docId,
-        type: 'document',
-        updatedAt: payload.updatedAt,
-        title: payload.title || 'Untitled document',
-        content: shouldKeepContent ? (payload.content || []) : [],
-        offlineUse: payload.offlineUse !== undefined ? payload.offlineUse : true,
-        createdAt: payload.createdAt || Date.now(),
-        synced: true,
-        lastSynced: Date.now(),
-        remoteLastModified: mtimeMs
+      const payload = {
+        updatedAt: Date.now(),
+        documents: indexDocsArray
       };
-      
-      if (existingDoc) {
-        doc._rev = existingDoc._rev;
-      }
-      
-      await db.put(doc);
-      
-      if (onChangeCallback) {
-        onChangeCallback({ id: docId, doc });
-      }
+
+      const jsonStr = JSON.stringify(payload);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const file = new File([blob], 'index.json', {
+        type: 'application/json',
+        lastModified: Date.now()
+      });
+
+      await filenClient.cloud().uploadWebFile({
+        file,
+        parent: parentUUID,
+        name: 'index.json'
+      });
     };
 
-    // 4. Resolve local changes
-    for (const localDoc of localDocs) {
-      const remoteItem = remoteMap.get(localDoc._id);
-      
-      if (localDoc.remoteLastModified && !remoteItem) {
-        // Synced before but deleted remotely
-        await db.remove(localDoc);
-      } else if (!remoteItem) {
-        // Not on remote yet. Upload it!
-        await uploadDocToFilen(localDoc);
+    // 2. Read remote index file (/Apps/Scriben/index.json)
+    let remoteIndexData = null;
+    try {
+      const indexContent = await filenClient.fs().readFile({ path: '/Apps/Scriben/index.json' });
+      remoteIndexData = JSON.parse(indexContent.toString('utf-8'));
+    } catch (e) {
+      remoteIndexData = null;
+    }
+
+    // 3. Load all local documents
+    const localResult = await db.allDocs({
+      include_docs: true,
+      startkey: 'doc_',
+      endkey: 'doc_\ufff0'
+    });
+    const localDocs = localResult.rows.map(row => row.doc);
+    const localMap = new Map(localDocs.map(doc => [doc._id, doc]));
+
+    // Remote index docs map (key: doc id)
+    const remoteIndexMap = new Map();
+    let indexDirty = false;
+
+    if (remoteIndexData && Array.isArray(remoteIndexData.documents)) {
+      for (const entry of remoteIndexData.documents) {
+        if (entry && entry.id) {
+          remoteIndexMap.set(entry.id, entry);
+        }
+      }
+    } else {
+      // If index file doesn't exist yet, scan remote documents directory to build initial index
+      let remoteFiles = [];
+      try {
+        remoteFiles = await filenClient.fs().readdir({ path: '/Apps/Scriben/documents' });
+      } catch (err) {
+        try {
+          remoteFiles = await filenClient.fs().readdir({ path: '/Scriben/documents' });
+        } catch (e) {
+          remoteFiles = [];
+        }
+      }
+
+      for (const filename of remoteFiles) {
+        if (!filename.endsWith('.json')) continue;
+        const docId = filename.substring(0, filename.length - 5);
+        const filePath = filename.startsWith('/Apps') ? filename : `/Apps/Scriben/documents/${filename}`;
+        try {
+          const stats = await filenClient.fs().stat({ path: filePath }).catch(async () => {
+            return await filenClient.fs().stat({ path: `/Scriben/documents/${filename}` });
+          });
+          remoteIndexMap.set(docId, {
+            id: docId,
+            title: localMap.get(docId)?.title || 'Untitled document',
+            updatedAt: stats.mtimeMs || Date.now(),
+            author: localMap.get(docId)?.author || settings.userId || 'Anonymous'
+          });
+        } catch (e) {}
+      }
+      indexDirty = true;
+    }
+
+    // Reconcile Remote Index with Local Database
+    const activeDeletedQueue = await getDeletedDocsQueue();
+
+    // A) Process Remote Index Items
+    for (const [docId, remoteDoc] of remoteIndexMap.entries()) {
+      if (activeDeletedQueue.includes(docId)) {
+        // Document deleted locally while offline
+        remoteIndexMap.delete(docId);
+        indexDirty = true;
+        try {
+          await filenClient.fs().rm({ path: `/Apps/Scriben/documents/${docId}.json`, permanent: true }).catch(() => {});
+          await removeFromDeletedDocsQueue(docId);
+        } catch (e) {}
+        continue;
+      }
+
+      const localDoc = localMap.get(docId);
+
+      if (!localDoc) {
+        // Document exists in cloud index, but not in local PouchDB!
+        // Create local document header record WITHOUT downloading full content file
+        const newLocalDoc = {
+          _id: docId,
+          type: 'document',
+          updatedAt: remoteDoc.updatedAt || Date.now(),
+          title: remoteDoc.title || 'Untitled document',
+          author: remoteDoc.author || settings.userId || 'Anonymous',
+          content: [], // Content remains empty until fetched on demand
+          offlineUse: false, // Default to online header until opened/synced
+          createdAt: remoteDoc.updatedAt || Date.now(),
+          synced: true,
+          lastSynced: Date.now(),
+          remoteLastModified: remoteDoc.updatedAt
+        };
+        await db.put(newLocalDoc);
+        if (onChangeCallback) onChangeCallback({ id: docId, doc: newLocalDoc });
       } else {
-        // Compare modified dates
-        if (localDoc.updatedAt > (localDoc.lastSynced || 0)) {
-          // Local is newer
+        // Local doc exists
+        if (localDoc.updatedAt > (localDoc.lastSynced || 0) && localDoc.updatedAt > (remoteDoc.updatedAt || 0)) {
+          // Local is newer: upload local doc file to cloud & update remote index entry
           await uploadDocToFilen(localDoc);
-        } else if (remoteItem.stats.mtimeMs > (localDoc.remoteLastModified || 0)) {
-          // Remote is newer
-          await downloadDocFromFilen(remoteItem.filePath, remoteItem.stats.mtimeMs);
+          remoteIndexMap.set(docId, {
+            id: localDoc._id,
+            title: localDoc.title,
+            updatedAt: localDoc.updatedAt,
+            author: localDoc.author || settings.userId || 'Anonymous'
+          });
+          indexDirty = true;
+        } else if ((remoteDoc.updatedAt || 0) > (localDoc.updatedAt || 0)) {
+          // Remote index entry is newer
+          localDoc.title = remoteDoc.title || localDoc.title;
+          if (remoteDoc.author) localDoc.author = remoteDoc.author;
+          localDoc.updatedAt = remoteDoc.updatedAt;
+          localDoc.synced = true;
+          localDoc.remoteLastModified = remoteDoc.updatedAt;
+          await db.put(localDoc);
+          if (onChangeCallback) onChangeCallback({ id: docId, doc: localDoc });
         } else {
-          // Both are equal
-          // If offlineUse has been disabled, clear content from local DB to save space (if not active)
-          if (localDoc.offlineUse === false && localDoc._id !== activeDocId && localDoc.content && localDoc.content.length > 0) {
-            localDoc.content = [];
+          // Synced & equal
+          if (!localDoc.synced || localDoc.author !== remoteDoc.author || localDoc.title !== remoteDoc.title) {
             localDoc.synced = true;
-            await db.put(localDoc);
-          } else if (!localDoc.synced) {
-            localDoc.synced = true;
+            localDoc.author = remoteDoc.author || localDoc.author;
             await db.put(localDoc);
           }
         }
       }
     }
 
-    // 5. Check remote-only files
-    for (const [docId, remoteItem] of remoteMap.entries()) {
-      if (!localMap.has(docId)) {
-        // Did we delete this document local-offline?
-        const deletedDocsUpdated = await getDeletedDocsQueue();
-        if (deletedDocsUpdated.includes(docId)) {
-          try {
-            await filenClient.fs().rm({ path: remoteItem.filePath, permanent: true });
-            await removeFromDeletedDocsQueue(docId);
-          } catch (err) {
-            console.error(`[Sync] Clean up remote delete failed for ${docId}:`, err);
-          }
+    // B) Process Local-only Documents (not in remote index)
+    for (const localDoc of localDocs) {
+      if (!remoteIndexMap.has(localDoc._id)) {
+        if (activeDeletedQueue.includes(localDoc._id)) {
+          await db.remove(localDoc);
+          await removeFromDeletedDocsQueue(localDoc._id);
         } else {
-          // Download the document
-          await downloadDocFromFilen(remoteItem.filePath, remoteItem.stats.mtimeMs);
+          // Upload local document to cloud
+          await uploadDocToFilen(localDoc);
+          const refreshed = await db.get(localDoc._id);
+          remoteIndexMap.set(localDoc._id, {
+            id: refreshed._id,
+            title: refreshed.title,
+            updatedAt: refreshed.updatedAt,
+            author: refreshed.author || settings.userId || 'Anonymous'
+          });
+          indexDirty = true;
         }
       }
+    }
+
+    // 4. Save index file to Filen if index was changed
+    if (indexDirty || !remoteIndexData) {
+      const updatedDocsArray = Array.from(remoteIndexMap.values());
+      await uploadIndexToFilen(updatedDocsArray);
     }
 
     if (onSyncStatusCallback) onSyncStatusCallback('online');

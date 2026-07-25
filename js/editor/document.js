@@ -93,8 +93,10 @@ export async function loadContent() {
                 localStorage.removeItem(STORAGE_KEY);
             }
 
+            const syncSettings = await getSyncSettings();
             doc = {
                 title: 'Untitled document',
+                author: (syncSettings && syncSettings.userId) ? syncSettings.userId : 'Anonymous',
                 content: contentData,
                 offlineUse: true,
                 pageFormat: 'a4',

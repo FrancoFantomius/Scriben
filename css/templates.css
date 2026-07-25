@@ -140,7 +140,7 @@
 /* Header Columns */
 .docs-list-header {
     display: grid;
-    grid-template-columns: 3fr 1.5fr 1fr 50px;
+    grid-template-columns: 2.5fr 1.5fr 1.5fr 1fr 50px;
     padding: 10px 16px;
     border-bottom: 1px solid var(--color-toolbar-border);
     font-size: 13px;
@@ -151,7 +151,7 @@
 /* Document Row */
 .document-row {
     display: grid;
-    grid-template-columns: 3fr 1.5fr 1fr 50px;
+    grid-template-columns: 2.5fr 1.5fr 1.5fr 1fr 50px;
     align-items: center;
     padding: 10px 16px;
     border-bottom: 1px solid var(--color-toolbar-border);
@@ -190,6 +190,13 @@
 
 .col-name-wrapper .doc-title:hover {
     text-decoration: underline;
+}
+
+.col-author {
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .col-date {
@@ -407,6 +414,7 @@
     .docs-list-header {
         grid-template-columns: 1fr 50px;
     }
+    .docs-list-header .col-author,
     .docs-list-header .col-date {
         display: none;
     }
@@ -414,6 +422,7 @@
     .document-row {
         grid-template-columns: 1fr 50px;
     }
+    .document-row .col-author,
     .document-row .col-date {
         display: none;
     }

@@ -156,6 +156,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    // --- Helper to resolve Author User ID to Username ---
+    let currentSyncSettings = null;
+    function getAuthorDisplayName(authorId, settings) {
+        if (!authorId || authorId === 'Anonymous') {
+            return (settings && (settings.username || settings.email)) ? (settings.username || settings.email) : 'Anonymous';
+        }
+        if (settings && (settings.userId === authorId)) {
+            return settings.username || settings.email || 'You';
+        }
+        if (authorId.includes('@')) {
+            return authorId.split('@')[0];
+        }
+        return (settings && settings.username) ? settings.username : authorId;
+    }
+
     // --- Document Templates Creation Handler ---
     const templateCards = document.querySelectorAll('.template-card');
     templateCards.forEach(card => {
@@ -164,10 +179,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const template = TEMPLATES[templateKey];
             if (!template) return;
 
+            const settings = await getSyncSettings();
             const newId = 'doc_' + crypto.randomUUID();
             const now = Date.now();
             const docObj = {
                 title: template.title,
+                author: settings.userId || settings.username || settings.email || 'Anonymous',
                 content: template.content,
                 offlineUse: true,
                 createdAt: now,
@@ -195,6 +212,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Load and Render Document List ---
     async function loadAndRenderDocuments() {
         try {
+            currentSyncSettings = await getSyncSettings();
             allDocs = await loadAllDocumentHeaders();
 
             // Sort by updatedAt descending
@@ -250,11 +268,14 @@ document.addEventListener('DOMContentLoaded', () => {
             row.className = 'document-row';
             row.dataset.id = doc.id;
 
+            const authorDisplayName = getAuthorDisplayName(doc.author, currentSyncSettings);
+
             row.innerHTML = `
                 <div class="col-name-wrapper">
                     <span class="material-symbols-outlined doc-icon">description</span>
                     <a class="doc-title" href="./editor.html?id=${doc.id}">${escapeHTML(doc.title)}</a>
                 </div>
+                <div class="col-author">${escapeHTML(authorDisplayName)}</div>
                 <div class="col-date">${formatDate(doc.updatedAt)}</div>
                 <div class="col-offline">
                     <input type="checkbox" class="offline-toggle-checkbox" data-id="${doc.id}" ${doc.offlineUse !== false ? 'checked' : ''} title="Keep offline copy">
