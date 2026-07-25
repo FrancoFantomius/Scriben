@@ -1,6 +1,6 @@
 {
   "name": "scriben",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "Secure document editor with Filen sync integration.",
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -11,7 +11,21 @@
     "deploy": "vite build"
   },
   "dependencies": {
-    "@filen/sdk": "^0.3.12"
+    "@filen/sdk": "^0.3.12",
+    "@fontsource/google-sans": "^5.3.0",
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/lato": "^5.3.0",
+    "@fontsource/material-symbols-outlined": "^5.3.0",
+    "@fontsource/montserrat": "^5.3.0",
+    "@fontsource/noto-sans": "^5.3.0",
+    "@fontsource/nunito": "^5.3.0",
+    "@fontsource/nunito-sans": "^5.3.0",
+    "@fontsource/open-sans": "^5.3.0",
+    "@fontsource/oswald": "^5.3.0",
+    "@fontsource/playfair-display": "^5.3.0",
+    "@fontsource/roboto": "^5.3.0",
+    "@fontsource/roboto-slab": "^5.3.0",
+    "@fontsource/ubuntu": "^5.3.0"
   },
   "devDependencies": {
     "vite": "^8.0.14",

@@ -1,3 +1,5 @@
+@import "./fonts.css";
+
 /* Light theme - Scriben */
 :root {
     --font-ui: 'Google Sans', sans-serif;

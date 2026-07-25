@@ -1,0 +1,39 @@
+/* 
+  Local self-hosted Fontsource font imports & Material Symbols icon styles
+  Replaces external Google CDN dependencies (fonts.googleapis.com & fonts.gstatic.com)
+*/
+
+@import "@fontsource/material-symbols-outlined";
+@import "@fontsource/google-sans";
+@import "@fontsource/inter";
+
+/* Editor Fonts */
+@import "@fontsource/noto-sans";
+@import "@fontsource/montserrat";
+@import "@fontsource/lato";
+@import "@fontsource/oswald";
+@import "@fontsource/nunito";
+@import "@fontsource/nunito-sans";
+@import "@fontsource/playfair-display";
+@import "@fontsource/roboto-slab";
+@import "@fontsource/ubuntu";
+@import "@fontsource/roboto";
+
+/* Material Symbols Outlined Icon Styling */
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'liga';
+}

@@ -2,11 +2,35 @@ import { defineConfig } from 'vite';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+function copyRootAssetsPlugin() {
+  return {
+    name: 'copy-root-assets',
+    closeBundle() {
+      const distDir = path.resolve(__dirname, 'dist');
+      if (!fs.existsSync(distDir)) return;
+      const filesToCopy = ['manifest.json', 'fonts.json', 'CNAME'];
+      filesToCopy.forEach(file => {
+        const src = path.resolve(__dirname, file);
+        if (fs.existsSync(src)) {
+          fs.copyFileSync(src, path.resolve(distDir, file));
+        }
+      });
+      const iconsSrc = path.resolve(__dirname, 'icons');
+      const iconsDest = path.resolve(distDir, 'icons');
+      if (fs.existsSync(iconsSrc)) {
+        fs.cpSync(iconsSrc, iconsDest, { recursive: true });
+      }
+    }
+  };
+}
+
 export default defineConfig({
   base: './',
+  publicDir: false,
   resolve: {
     alias: {
       'fs-extra': path.resolve(__dirname, 'js/mocks/fs-extra.js'),
@@ -21,6 +45,7 @@ export default defineConfig({
       },
       protocolImports: true,
     }),
+    copyRootAssetsPlugin(),
   ],
   server: {
     port: 5173,
