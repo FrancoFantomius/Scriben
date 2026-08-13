@@ -12,6 +12,8 @@
 
 import { mergeRuns } from './model.js';
 
+export { mergeRuns };
+
 const BLOCK_TAG_SET = new Set([
     'P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
     'UL', 'OL', 'LI', 'TABLE', 'HR', 'BLOCKQUOTE',
@@ -142,10 +144,9 @@ function collectRunsInto(node, runs, inherited) {
     if (tag === 'IMG') {
         const run = { image: node.getAttribute('src') || '', ...inherited };
         if (node.getAttribute('alt')) run.alt = node.getAttribute('alt');
-        const width = node.getAttribute('width') || node.style.width;
-        const height = node.getAttribute('height') || node.style.height;
-        if (width) run.width = width;
-        if (height) run.height = height;
+        const dims = imageDims(node);
+        if (dims.width) run.width = dims.width;
+        if (dims.height) run.height = dims.height;
         runs.push(run);
         return;
     }
@@ -161,13 +162,31 @@ function collectRunsInto(node, runs, inherited) {
     }
 }
 
+/**
+ * Reads the drawn display size of an image for the model. Explicit `width`/
+ * `height` attributes (or inline styles) win; otherwise the browser's natural
+ * rendered dimensions are used so round-tripping through OOXML keeps the
+ * displayed size rather than dropping it.
+ * @param {HTMLImageElement} img
+ * @returns {{width?:string, height?:string}}
+ */
+function imageDims(img) {
+    const out = {};
+    const width = img.getAttribute('width') || img.style.width;
+    const height = img.getAttribute('height') || img.style.height;
+    if (width) out.width = width;
+    if (height) out.height = height;
+    if (!out.width && img.naturalWidth) out.width = `${img.naturalWidth}px`;
+    if (!out.height && img.naturalHeight) out.height = `${img.naturalHeight}px`;
+    return out;
+}
+
 function imageBlock(img) {
     const block = { type: 'image', src: img.getAttribute('src') || '' };
     if (img.getAttribute('alt')) block.alt = img.getAttribute('alt');
-    const width = img.getAttribute('width') || img.style.width;
-    const height = img.getAttribute('height') || img.style.height;
-    if (width) block.width = width;
-    if (height) block.height = height;
+    const dims = imageDims(img);
+    if (dims.width) block.width = dims.width;
+    if (dims.height) block.height = dims.height;
     return block;
 }
 
@@ -219,13 +238,15 @@ function sectionBlock(el) {
  * @param {Element} liEl
  * @param {number} depth
  * @param {boolean} ordered
+ * @param {number|null} [start] starting number of the owning <ol> (level 0 only)
  * @returns {object[]}
  */
-function liToBlocks(liEl, depth, ordered) {
+function liToBlocks(liEl, depth, ordered, start = null) {
     const block = {
         type: 'listItem',
         listType: ordered ? 'ordered' : 'unordered',
         level: depth,
+        ...(ordered && depth === 0 && start != null ? { start } : {}),
         ...alignOf(liEl)
     };
     const runs = [];
@@ -253,10 +274,16 @@ function liToBlocks(liEl, depth, ordered) {
 
 function listToBlocks(listEl, depth) {
     const ordered = listEl.tagName === 'OL';
+    const startAttr = listEl.getAttribute('start');
+    let start = null;
+    if (ordered && depth === 0 && startAttr != null && startAttr !== '') {
+        const parsed = parseInt(startAttr, 10);
+        if (Number.isFinite(parsed) && parsed >= 0) start = parsed;
+    }
     const out = [];
     for (const child of listEl.childNodes) {
         if (child.nodeType === Node.ELEMENT_NODE && child.tagName === 'LI') {
-            out.push(...liToBlocks(child, depth, ordered));
+            out.push(...liToBlocks(child, depth, ordered, start));
         }
     }
     return out;
@@ -404,6 +431,18 @@ export function pagesToModel(pageEls) {
     return blocks;
 }
 
+/**
+ * Converts an HTML string into canonical model blocks. Used by the opt-in
+ * mammoth fallback path (docxImport.FALLBACK_TO_MAMMOTH).
+ * @param {string} html
+ * @returns {object[]}
+ */
+export function domToBlocks(html) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = html;
+    return pagesToModel([wrap]);
+}
+
 // ─── Model -> DOM ────────────────────────────────────────────────────────────
 
 function styleFromRun(run) {
@@ -526,23 +565,25 @@ function makeHorizontalRule() {
 
 /**
  * Groups consecutive listItem blocks into nested <ul>/<ol> trees.
+ * Level-0 ordered groups split when the `start` value changes (mirrors the
+ * docx exporter's per-(type,start) numbering references).
  * @param {object[]} listItems
  * @returns {Element[]}
  */
 function listItemsToDom(listItems) {
     const roots = [];
-    const stack = []; // { level, type, el, lastLi }
+    const stack = []; // { level, type, start, el, lastLi }
 
     /**
      * Returns the list element open at `level`, creating the nesting path
      * (and filler `<li>` wrappers for level gaps) as needed. After the call
      * the stack top is the list at `level`.
      */
-    const ensureListAtLevel = (level, type) => {
+    const ensureListAtLevel = (level, type, start) => {
         while (stack.length && stack[stack.length - 1].level > level) stack.pop();
         const top = stack[stack.length - 1];
-        if (top && top.level === level && top.type === type) return top.el;
-        if (top && top.level === level) stack.pop(); // different type: sibling list
+        if (top && top.level === level && top.type === type && top.start === start) return top.el;
+        if (top && top.level === level) stack.pop(); // different type or start: sibling list
 
         let nextLevel = stack.length ? stack[stack.length - 1].level + 1 : 0;
         let list = null;
@@ -560,9 +601,13 @@ function listItemsToDom(listItems) {
                 list = document.createElement(nextLevel === level ? type : parent.type);
                 parent.lastLi.appendChild(list);
             }
+            if (type === 'ol' && start != null && start > 1 && nextLevel === level) {
+                list.setAttribute('start', String(start));
+            }
             stack.push({
                 level: nextLevel,
                 type: nextLevel === level ? type : (stack.length ? stack[stack.length - 1].type : type),
+                start: nextLevel === level ? start : null,
                 el: list,
                 lastLi: null
             });
@@ -574,7 +619,8 @@ function listItemsToDom(listItems) {
     for (const item of listItems) {
         const type = item.listType === 'ordered' ? 'ol' : 'ul';
         const level = Number(item.level) || 0;
-        const list = ensureListAtLevel(level, type);
+        const start = level === 0 && type === 'ol' ? (Number(item.start) || 1) : null;
+        const list = ensureListAtLevel(level, type, start);
         const li = document.createElement('li');
         li.innerHTML = runsToHtml(item.runs);
         if (item.align) li.style.textAlign = item.align;

@@ -8,12 +8,24 @@
  *   paragraph, heading, listItem, image, link, table, pageBreak,
  *   horizontalRule, section (and later footnote / comment / trackedChange).
  *
+ *   - listItem: `{ listType: 'ordered'|'unordered', level, start? }`. Nested
+ *     lists are flattened into consecutive listItem blocks; `level` is the
+ *     nesting depth and `start` (ordered, level 0 only) the first number.
+ *   - image: `{ src, alt?, width?, height? }` with `width`/`height` in CSS
+ *     lengths matching the drawn size at save/import time.
+ *
  * Inline model: text runs carrying formatting flags. Runs may additionally
  * carry `href` (inline link), `image` (inline image src) and `\n` text for
  * `<br>` hard breaks so that real editor DOM round-trips losslessly.
  */
 
 export const VALID_PAGE_FORMATS = ['a4', 'a5', 'letter', 'legal'];
+
+/**
+ * Soft cap for a single embedded image's Base64 payload (characters).
+ * Larger images bloat PouchDB documents; callers should warn, not fail.
+ */
+export const MAX_IMAGE_BASE64 = 5 * 1024 * 1024;
 
 export const DEFAULT_FONT_FAMILY = "'Noto Sans', 'Noto Sans Arabic', 'Noto Sans Devanagari', 'Noto Sans CJK TC', 'Noto Sans CJK SC', 'Noto Sans CJK JP', 'Noto Sans CJK KR', 'Noto Color Emoji', sans-serif";
 
@@ -45,6 +57,7 @@ export const INLINE_KEYS = [
     'fontFamily',
     'fontSize',
     'href',
+    'internal',
     'target',
     'image',
     'alt',
@@ -73,6 +86,12 @@ function clamp(value, min, max, fallback) {
     const n = Number(value);
     if (Number.isFinite(n)) return Math.min(max, Math.max(min, n));
     return fallback;
+}
+
+function copyIfPresent(target, source, keys) {
+    for (const key of keys) {
+        if (source[key] !== undefined && source[key] !== null) target[key] = source[key];
+    }
 }
 
 /**
@@ -130,12 +149,17 @@ function normalizeBlock(block) {
     const out = { type: block.type };
     if (block.align) out.align = String(block.align);
     switch (block.type) {
+        case 'paragraph':
+            copyIfPresent(out, block, ['indentLeft', 'indentRight', 'firstLine', 'spaceBefore', 'spaceAfter', 'lineSpacing', 'lineRule', 'keepNext', 'keepLines']);
+            break;
         case 'heading':
             out.level = Math.round(clamp(block.level, 1, 6, 1));
+            copyIfPresent(out, block, ['indentLeft', 'indentRight', 'firstLine', 'spaceBefore', 'spaceAfter', 'lineSpacing', 'lineRule', 'keepNext', 'keepLines']);
             break;
         case 'listItem':
             out.listType = block.listType === 'ordered' ? 'ordered' : 'unordered';
             out.level = Math.round(clamp(block.level, 0, 20, 0));
+            if (Number.isInteger(Number(block.start)) && Number(block.start) >= 1) out.start = Number(block.start);
             break;
         case 'link':
             out.href = typeof block.href === 'string' ? block.href : '';
@@ -160,6 +184,29 @@ function normalizeBlock(block) {
     }
 
     if (Array.isArray(block.runs)) out.runs = normalizeRuns(block.runs);
+    return out;
+}
+
+/**
+ * Finds embedded images whose Base64 payload exceeds `maxBytes`. Used to warn
+ * on document bloat without re-encoding: images are never rasterized or
+ * re-compressed anywhere in the pipeline (M4 guarantees byte fidelity).
+ * @param {object} model
+ * @param {number} [maxBytes]
+ * @returns {Array<{blockIndex:number, kind:string, size:number}>}
+ */
+export function findOversizedImages(model, maxBytes = MAX_IMAGE_BASE64) {
+    const out = [];
+    (model.blocks || []).forEach((block, blockIndex) => {
+        if (block && block.type === 'image' && typeof block.src === 'string' && block.src.length > maxBytes) {
+            out.push({ blockIndex, kind: 'image', size: block.src.length });
+        }
+        for (const run of (block && block.runs) || []) {
+            if (run && typeof run.image === 'string' && run.image.length > maxBytes) {
+                out.push({ blockIndex, kind: 'inlineImage', size: run.image.length });
+            }
+        }
+    });
     return out;
 }
 

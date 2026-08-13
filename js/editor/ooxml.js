@@ -21,6 +21,7 @@ import { runsEqual } from './model.js';
 export const NS = {
     w: 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
     r: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+    pkgrel: 'http://schemas.openxmlformats.org/package/2006/relationships',
     a: 'http://schemas.openxmlformats.org/drawingml/2006/main',
     wp: 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',
     pic: 'http://schemas.openxmlformats.org/drawingml/2006/picture',
@@ -306,7 +307,7 @@ export function text(el) {
 export function parseRels(relsDoc) {
     const map = new Map();
     if (!relsDoc) return map;
-    for (const rel of relsDoc.getElementsByTagNameNS(NS.r, 'Relationship')) {
+    for (const rel of relsDoc.getElementsByTagNameNS(NS.pkgrel, 'Relationship')) {
         const id = rel.getAttribute('Id');
         const target = rel.getAttribute('Target');
         if (!id || !target) continue;
@@ -427,10 +428,13 @@ export function walkBody(bodyEl, ctx) {
 /**
  * Collects run containers (w:r / w:hyperlink / w:ins / w:del) from a
  * paragraph in document order, descending through w:sdt/w:sdtContent.
+ * Paragraph-level bookmarks are registered here (Word writes them inside
+ * w:p, outside the body walker's reach).
  * @param {Element} paragraphEl
+ * @param {object} ctx
  * @returns {Array<{el:Element, type:string}>}
  */
-function collectRuns(paragraphEl) {
+function collectRuns(paragraphEl, ctx) {
     const out = [];
     const walk = container => {
         for (const node of Array.from(container.childNodes)) {
@@ -442,8 +446,16 @@ function collectRuns(paragraphEl) {
             else if (name === 'sdt') {
                 const content = child(node, 'sdtContent');
                 if (content) walk(content);
+            } else if (name === 'bookmarkStart') {
+                const id = attr(node, 'w:id');
+                const bmName = attr(node, 'w:name');
+                if (id) ctx.bookmarkIds.add(id);
+                if (bmName && id) ctx.bookmarks.set(bmName, id);
+            } else if (name === 'bookmarkEnd') {
+                const id = attr(node, 'w:id');
+                if (id && !ctx.bookmarkIds.has(id)) warn(ctx, 'UNPAIRED_BOOKMARK');
             }
-            // proofErr, bookmarkStart, commentRangeStart, etc. are not runs.
+            // proofErr, commentRangeStart, etc. are not runs.
         }
     };
     walk(paragraphEl);
@@ -645,7 +657,7 @@ function parseRPr(rPr, ctx) {
             let size = Math.min(1638, Math.max(1, val));
             const csVal = szCs ? parseInt(attr(szCs, 'w:val'), 10) : NaN;
             if (isFinite(csVal) && csVal > val) size = Math.min(1638, Math.max(1, csVal));
-            out.fontSizePt = size / 2;
+            out.fontSize = `${size / 2}pt`;
         }
     }
 
@@ -964,6 +976,7 @@ function parseLegacyImage(el, ctx) {
 function classifyFormat(widthMM, heightMM) {
     for (const p of PAGE_PRESETS) {
         if (Math.abs(widthMM - p.w) <= 1 && Math.abs(heightMM - p.h) <= 1) return p.format;
+        if (Math.abs(widthMM - p.h) <= 1 && Math.abs(heightMM - p.w) <= 1) return p.format;
     }
     return 'custom';
 }
@@ -984,9 +997,13 @@ export function parseSectPr(sectPr, ctx) {
     let widthMM = twipsToMm(wTwips);
     let heightMM = twipsToMm(hTwips);
     if (orientation === 'landscape') {
-        const t = widthMM;
-        widthMM = heightMM;
-        heightMM = t;
+        // A landscape page is physically wider than tall. This normalizes both
+        // writers that store the long side in w:w and those that keep portrait
+        // dimensions with an orientation flag.
+        const max = Math.max(widthMM, heightMM);
+        const min = Math.min(widthMM, heightMM);
+        widthMM = max;
+        heightMM = min;
     }
 
     const margins = { top: null, bottom: null, left: null, right: null };
@@ -1019,17 +1036,28 @@ function loadNumbering(ctx) {
     for (const an of doc.getElementsByTagNameNS(NS.w, 'abstractNum')) {
         const id = attr(an, 'w:abstractNumId');
         if (id == null) continue;
-        const info = { numFmt: null, start: 1 };
+        const levels = [];
         for (const lvl of an.getElementsByTagNameNS(NS.w, 'lvl')) {
-            if (attr(lvl, 'w:ilvl') !== '0' && attr(lvl, 'w:ilvl') != null) continue;
+            const ilvlAttr = attr(lvl, 'w:ilvl');
+            const ilvl = ilvlAttr != null ? parseInt(ilvlAttr, 10) : levels.length;
+            if (!isFinite(ilvl)) continue;
+            const info = {};
             const numFmtEl = child(lvl, 'numFmt');
             if (numFmtEl) info.numFmt = attr(numFmtEl, 'w:val');
             const startEl = child(lvl, 'start');
             const startVal = startEl ? parseInt(attr(startEl, 'w:val'), 10) : 1;
             if (isFinite(startVal)) info.start = startVal;
-            break;
+            const pPr = child(lvl, 'pPr');
+            const indEl = pPr ? child(pPr, 'ind') : null;
+            if (indEl) {
+                const left = twipsToPt(attr(indEl, 'w:left'));
+                const hanging = twipsToPt(attr(indEl, 'w:hanging'));
+                if (left != null) info.indentLeft = left;
+                if (hanging != null) info.hanging = hanging;
+            }
+            levels[ilvl] = info;
         }
-        abstractNums.set(id, info);
+        abstractNums.set(id, levels);
     }
 
     for (const num of doc.getElementsByTagNameNS(NS.w, 'num')) {
@@ -1037,20 +1065,57 @@ function loadNumbering(ctx) {
         const anIdEl = child(num, 'abstractNumId');
         const anId = anIdEl ? attr(anIdEl, 'w:val') : null;
         if (numId == null || anId == null) continue;
-        const info = abstractNums.get(anId) || { numFmt: null, start: 1 };
-        ctx.numbering.map.set(numId, info);
+        const overrides = [];
+        for (const ov of num.getElementsByTagNameNS(NS.w, 'lvlOverride')) {
+            const lvl = parseInt(attr(ov, 'w:ilvl'), 10);
+            const startOv = child(ov, 'startOverride');
+            const val = startOv ? parseInt(attr(startOv, 'w:val'), 10) : NaN;
+            if (isFinite(lvl) && isFinite(val)) overrides[lvl] = val;
+        }
+        ctx.numbering.map.set(numId, {
+            levels: abstractNums.get(anId) || [],
+            overrides
+        });
     }
     return ctx.numbering;
 }
 
+const ORDERED_NUM_FMTS = [
+    'decimal', 'decimalzero',
+    'lowerletter', 'upperletter',
+    'lowerroman', 'upperroman',
+    'ordinal', 'cardinaltext', 'ordinaltext'
+];
+
+/**
+ * Resolves a paragraph's `w:numPr` to a listItem shape. Reads the abstract
+ * numbering level for the paragraph's ilvl: numFmt → listType, start + indent.
+ * Returns null when numbering.xml is missing/malformed (the caller degrades to
+ * a flat paragraph with NUMBERING_DEFERRED).
+ * @param {{numId:string, level:number}} list
+ * @param {object} ctx
+ * @returns {{listType:string, level:number, start?:number, indentLeft?:number, hanging?:number}|null}
+ */
 function resolveList(list, ctx) {
     const numbering = loadNumbering(ctx);
-    const info = numbering.map.get(String(list.numId));
-    if (!info || !info.numFmt) return null;
-    const listType = info.numFmt === 'bullet' ? 'unordered' : 'ordered';
+    const numInfo = numbering.map.get(String(list.numId));
+    if (!numInfo) return null;
     const level = Math.min(8, Math.max(0, Number(list.level) || 0));
-    const out = { listType, level };
-    if (listType === 'ordered' && info.start && info.start !== 1) out.start = info.start;
+    const lvlInfo = (numInfo.levels || [])[level];
+    if (!lvlInfo || !lvlInfo.numFmt) return null;
+    const fmt = String(lvlInfo.numFmt).toLowerCase();
+    if (fmt === 'bullet') {
+        return { listType: 'unordered', level };
+    }
+    if (!ORDERED_NUM_FMTS.includes(fmt)) return null;
+
+    const out = { listType: 'ordered', level };
+    let start = lvlInfo.start;
+    const override = (numInfo.overrides || [])[level];
+    if (override != null) start = override;
+    if (start != null && start !== 1) out.start = start;
+    if (lvlInfo.indentLeft != null) out.indentLeft = lvlInfo.indentLeft;
+    if (lvlInfo.hanging != null) out.hanging = lvlInfo.hanging;
     return out;
 }
 
@@ -1154,7 +1219,7 @@ function parseParagraph(pEl, ctx) {
 
     if (props.pageBreakBefore) blocks.unshift({ type: 'pageBreak' });
 
-    for (const container of collectRuns(pEl)) {
+    for (const container of collectRuns(pEl, ctx)) {
         for (const run of parseContainer(container, ctx, pEl)) {
             if (run && run.__pageBreak) {
                 blocks.push({ type: 'pageBreak' });
@@ -1166,10 +1231,9 @@ function parseParagraph(pEl, ctx) {
         }
     }
 
-    return blocks
-        .filter(b => b.type !== 'pageBreak')
-        .map(b => {
-            b.runs = mergeRunsLocal(b.runs);
-            return finalizeParagraph(b, props, ctx);
-        });
+    return blocks.map(b => {
+        if (b.type === 'pageBreak') return b;
+        b.runs = mergeRunsLocal(b.runs);
+        return finalizeParagraph(b, props, ctx);
+    });
 }

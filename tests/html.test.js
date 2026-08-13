@@ -154,6 +154,21 @@ describe('pagesToModel', () => {
         ]);
     });
 
+    test('ol start attribute becomes listItem.start at level 0', () => {
+        const blocks = pagesToModel(makePages(['<ol start="5"><li>a</li><li>b</li></ol>']));
+        assert.deepStrictEqual(blocks, [
+            { type: 'listItem', listType: 'ordered', level: 0, start: 5, runs: [{ text: 'a' }] },
+            { type: 'listItem', listType: 'ordered', level: 0, start: 5, runs: [{ text: 'b' }] }
+        ]);
+    });
+
+    test('start applies only to top-level items of the owning ol', () => {
+        const blocks = pagesToModel(makePages(['<ol start="3"><li>a<ol><li>b</li></ol></li><li>c</li></ol>']));
+        assert.deepStrictEqual(blocks.map(b => [b.level, b.start]), [
+            [0, 3], [1, undefined], [0, 3]
+        ]);
+    });
+
     test('tables produce cols and rows', () => {
         const blocks = pagesToModel(makePages(['<table><tr><td>a</td><td>b</td></tr><tr><td>c</td></tr></table>']));
         assert.deepStrictEqual(blocks, [
@@ -252,6 +267,19 @@ describe('modelToPages', () => {
         assert.ok(html.includes('text-align: center'));
         assert.ok(html.includes('text-align: justify'));
     });
+
+    test('listItem start is re-emitted on the rebuilt ol', () => {
+        container.innerHTML = '';
+        const model = normalizeModel({
+            blocks: [
+                { type: 'listItem', listType: 'ordered', level: 0, start: 5, runs: [{ text: 'a' }] },
+                { type: 'listItem', listType: 'ordered', level: 0, start: 5, runs: [{ text: 'b' }] }
+            ]
+        });
+        const pages = modelToPages(model, pageFactory);
+        const html = pages[0].innerHTML;
+        assert.ok(html.includes('<ol start="5">'), html);
+    });
 });
 
 describe('round-trip identity', () => {
@@ -280,6 +308,12 @@ describe('round-trip identity', () => {
         assertRoundTrip(makePages([
             '<p style="text-align: right;">Right</p>',
             '<h2 style="text-align: justify;">J</h2>'
+        ]));
+    });
+
+    test('ol start round-trips stably', () => {
+        assertRoundTrip(makePages([
+            '<ol start="5"><li>a</li><li>b</li></ol>'
         ]));
     });
 });

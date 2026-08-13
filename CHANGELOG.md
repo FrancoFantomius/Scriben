@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Word (.docx) round-trip fidelity for nested bullet/numbered lists (including `start`), external + internal anchor hyperlinks, and inline images (byte-identical, never re-encoded). Covers both export (`docxExport.js`: numbering, hyperlinks, bookmarks, `ImageRun`) and import (`ooxml.js`: per-level `w:numPr` resolution).
+- Golden round-trip test corpus (`tests/fixtures/*.docx`, `tests/golden.test.js`): every fixture must survive import → export → import structurally unchanged.
+- `<ol start>` is now captured in the model and re-emitted on export; image nodes record their drawn size.
+
 ### Changed
+- Soft cap on embedded image size: autosave warns (never blocks) when an image's Base64 payload exceeds 5 MB, since images are intentionally never re-compressed.
 - Updated `@filen/sdk` to v0.4.x and `vite-plugin-node-polyfills` to v0.2.0.
 
 ## [1.0.0] - 2026-07-25

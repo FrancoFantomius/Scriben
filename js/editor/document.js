@@ -3,7 +3,7 @@ import { applyPageFormat, applyFontFamily } from './ui.js';
 import { createPage, paginate } from './pagination.js';
 import { applyAppTheme } from './theme.js';
 import { pagesToModel, modelToPages } from './html.js';
-import { normalizeModel, validateModel, DEFAULT_FONT_FAMILY } from './model.js';
+import { normalizeModel, validateModel, DEFAULT_FONT_FAMILY, findOversizedImages } from './model.js';
 import {
     saveDocument,
     getDocument,
@@ -81,6 +81,15 @@ export async function saveContent() {
 
     try {
         state.currentDoc.model = buildModelFromPages(pages);
+        // Soft cap: warn (never block) when an embedded image is oversized.
+        // Images are not re-encoded, so this is advisory for PouchDB bloat.
+        const oversized = findOversizedImages(state.currentDoc.model);
+        if (oversized.length > 0) {
+            console.warn(
+                `[scriben] ${oversized.length} embedded image(s) exceed 5 MB and will bloat the stored document. ` +
+                'Images are kept byte-identical by design; consider re-inserting a compressed copy.'
+            );
+        }
     } catch (err) {
         // Never block autosave on a model serialization failure.
         console.error("Failed to build document model:", err);

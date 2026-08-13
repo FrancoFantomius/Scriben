@@ -426,6 +426,42 @@ select {
     height: 0 !important;
 }
 
+/* Drag-and-drop import overlay */
+.drop-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 15000;
+    background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.drop-overlay-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 48px 64px;
+    background: var(--color-dropdown-bg);
+    border: 2px dashed var(--color-brand);
+    border-radius: 16px;
+    color: var(--color-text);
+    font-family: var(--font-ui, 'Google Sans', sans-serif);
+}
+
+.drop-overlay-inner .material-symbols-outlined {
+    font-size: 64px;
+    color: var(--color-brand);
+}
+
+.drop-overlay-title {
+    font-size: 18px;
+    font-weight: 600;
+}
+
 /* Dark Mode overrides for hardcoded/inline light-theme colors in documents */
 :root[data-theme="dark"] .page [style*="color: #202124" i],
 :root[data-theme="dark"] .page [style*="color:#202124" i],
