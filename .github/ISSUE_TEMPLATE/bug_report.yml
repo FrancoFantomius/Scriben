@@ -1,0 +1,93 @@
+name: Bug report
+description: Report a problem or unexpected behaviour in Scriben
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill out the details below so the issue can be reproduced and fixed quickly.
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is.
+      placeholder: Tell us what happens...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: The exact steps to trigger the bug.
+      placeholder: |
+        1. Open the editor...
+        2. Click on...
+        3. See error...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What actually happened?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which part of the app is affected?
+      multiple: true
+      options:
+        - Editor / formatting
+        - Pagination / page layout
+        - Templates / dashboard
+        - PDF export
+        - Sync (PouchDB / Filen)
+        - Landing / static pages
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser
+      description: Browser and version you were using (e.g. Chrome 126, Firefox 127, Safari 17.5).
+      placeholder: Chrome 126
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      description: Operating system and version (e.g. Windows 11, macOS 14, Android 14).
+      placeholder: Windows 11
+    validations:
+      required: true
+  - type: dropdown
+    id: sync
+    attributes:
+      label: Sync involved?
+      description: Was cloud sync (Filen) enabled when the bug happened?
+      options:
+        - "No"
+        - "Yes"
+        - Not sure
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots / logs
+      description: If applicable, add screenshots, console output, or error messages to help explain the problem.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else that might help — e.g. document type, template used, page count.

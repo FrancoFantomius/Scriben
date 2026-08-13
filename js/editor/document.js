@@ -2,6 +2,8 @@ import { state, getPages } from './state.js';
 import { applyPageFormat, applyFontFamily } from './ui.js';
 import { createPage, paginate } from './pagination.js';
 import { applyAppTheme } from './theme.js';
+import { pagesToModel, modelToPages } from './html.js';
+import { normalizeModel, validateModel, DEFAULT_FONT_FAMILY } from './model.js';
 import {
     saveDocument,
     getDocument,
@@ -13,6 +15,28 @@ import {
 } from '../sync.js';
 
 const STORAGE_KEY = 'scriben-wysiwyg-content';
+
+/**
+ * Builds the canonical model from the current set of page elements.
+ * @param {Element[]} pages
+ * @returns {object}
+ */
+function buildModelFromPages(pages) {
+    const model = {
+        title: state.currentDoc.title || 'Untitled document',
+        blocks: pagesToModel(pages),
+        pageFormat: state.currentDoc.pageFormat || 'a4',
+        fontFamily: state.currentDoc.fontFamily || DEFAULT_FONT_FAMILY,
+        updatedAt: state.currentDoc.updatedAt || Date.now()
+    };
+    return normalizeModel(model);
+}
+
+function debugModelLog(label, model) {
+    if (window.__scribenModelDebug && model) {
+        console.log(`[scriben:model:${label}]`, JSON.stringify(model, null, 2));
+    }
+}
 
 function debounce(func, wait) {
     let timeout;
@@ -54,6 +78,16 @@ export async function saveContent() {
     state.currentDoc.title = title || 'Untitled document';
     state.currentDoc.content = data;
     state.currentDoc.updatedAt = Date.now();
+
+    try {
+        state.currentDoc.model = buildModelFromPages(pages);
+    } catch (err) {
+        // Never block autosave on a model serialization failure.
+        console.error("Failed to build document model:", err);
+        delete state.currentDoc.model;
+    }
+
+    debugModelLog('save', state.currentDoc.model);
 
     try {
         await saveDocument(state.docId, state.currentDoc);
@@ -114,6 +148,16 @@ export async function loadContent() {
             }
         }
 
+        // ── Model migration ──────────────────────────────────────────────────
+        // Legacy docs store per-page HTML in `content` with no `model`. Derive
+        // the canonical model once and persist it (migration write) so every
+        // subsequent load prefers the model. Never force-rendered: the model is
+        // only stored after a successful derivation.
+        if (!doc.model) {
+            const migrated = await migrateToModel(doc);
+            if (migrated) doc = migrated;
+        }
+
         state.currentDoc = doc;
         renderDocument(doc);
     } catch (err) {
@@ -122,7 +166,49 @@ export async function loadContent() {
 }
 
 /**
+ * Derives and persists a canonical model for a legacy doc that only carries
+ * per-page HTML in `content`. Returns the migrated doc or null on failure.
+ * @param {object} doc
+ * @returns {Promise<object|null>}
+ */
+async function migrateToModel(doc) {
+    try {
+        const contentArray = Array.isArray(doc.content)
+            ? doc.content
+            : (typeof doc.content === 'string' && doc.content ? [doc.content] : []);
+
+        let blocks = [];
+        if (contentArray.length > 0) {
+            const pageEls = contentArray.map(html => {
+                const el = document.createElement('div');
+                el.innerHTML = html;
+                return el;
+            });
+            blocks = pagesToModel(pageEls);
+        }
+
+        const model = normalizeModel({
+            title: doc.title,
+            blocks,
+            pageFormat: doc.pageFormat || 'a4',
+            fontFamily: doc.fontFamily || DEFAULT_FONT_FAMILY,
+            updatedAt: doc.updatedAt || Date.now()
+        });
+
+        const migrated = { ...doc, model };
+        await saveDocument(state.docId, migrated);
+        debugModelLog('migrate', model);
+        return migrated;
+    } catch (err) {
+        console.error("Failed to migrate document to canonical model:", err);
+        return null;
+    }
+}
+
+/**
  * Renders the document model in the pages container workspace.
+ * Prefers the canonical `model`; falls back to the legacy per-page HTML
+ * path exactly as before when no model is present or it fails validation.
  * @param {object} doc 
  */
 export function renderDocument(doc) {
@@ -132,26 +218,42 @@ export function renderDocument(doc) {
     }
 
     applyPageFormat(doc.pageFormat || 'a4');
-    applyFontFamily(doc.fontFamily || "'Noto Sans', 'Noto Sans Arabic', 'Noto Sans Devanagari', 'Noto Sans CJK TC', 'Noto Sans CJK SC', 'Noto Sans CJK JP', 'Noto Sans CJK KR', 'Noto Color Emoji', sans-serif");
+    applyFontFamily(doc.fontFamily || DEFAULT_FONT_FAMILY);
 
-    let contentArray = [];
-    if (doc.content) {
-        if (Array.isArray(doc.content)) {
-            contentArray = doc.content;
-        } else if (typeof doc.content === 'string') {
-            contentArray = [doc.content];
+    let renderedFromModel = false;
+    if (doc.model) {
+        try {
+            validateModel(doc.model);
+            const model = normalizeModel(doc.model);
+            debugModelLog('render', model);
+            state.container.innerHTML = '';
+            modelToPages(model, createPage);
+            renderedFromModel = true;
+        } catch (err) {
+            console.warn("Invalid document model; falling back to legacy content:", err);
         }
     }
 
-    if (contentArray.length > 0) {
-        state.container.innerHTML = '';
-        contentArray.forEach(html => {
-            const page = createPage();
-            page.innerHTML = html;
-        });
-    } else {
-        state.container.innerHTML = '';
-        createPage();
+    if (!renderedFromModel) {
+        let contentArray = [];
+        if (doc.content) {
+            if (Array.isArray(doc.content)) {
+                contentArray = doc.content;
+            } else if (typeof doc.content === 'string') {
+                contentArray = [doc.content];
+            }
+        }
+
+        if (contentArray.length > 0) {
+            state.container.innerHTML = '';
+            contentArray.forEach(html => {
+                const page = createPage();
+                page.innerHTML = html;
+            });
+        } else {
+            state.container.innerHTML = '';
+            createPage();
+        }
     }
 
     updateOfflineMenuCheckmark(doc.offlineUse !== false);

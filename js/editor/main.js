@@ -9,7 +9,6 @@ import {
     registerCallbacks,
     getSyncSettings,
     saveSyncSettings,
-    saveDocument,
     startSync,
     stopSync,
     destroyDatabase
@@ -21,6 +20,8 @@ import { state, getPages } from './state.js';
 import { initSelection } from './selection.js';
 import { paginate, createPage, bindPageEvents } from './pagination.js';
 import { exec, getActivePage } from './commands.js';
+import { pagesToModel } from './html.js';
+import { validateModel, normalizeModel } from './model.js';
 import {
     getActiveDocumentId,
     saveContent,
@@ -31,6 +32,7 @@ import {
     updateOfflineMenuCheckmark
 } from './document.js';
 import { exportPdf, initPdfExport } from './pdf.js';
+import { initCompat } from './compat.js';
 import { applyAppTheme } from './theme.js';
 import { initModals, openLinkModal, openTableModal } from './modals.js';
 import { initColorPicker, showColorPicker, hideColorPicker, getColorPickerPopover, isColorPickerVisible } from './colorPicker.js';
@@ -49,6 +51,25 @@ import {
 
 document.addEventListener('DOMContentLoaded', async () => {
     localStorage.setItem('scriben-has-used', 'true');
+
+    // ── Model debug console helpers ─────────────────────────────────────────
+    // window.__scribenModelDebug = true toggles JSON dumps from document.js.
+    // window.__scribenModelDump() prints the current page contents as a model.
+    window.__scribenModelDebug = window.__scribenModelDebug || false;
+    window.__scribenModelDump = () => {
+        const blocks = pagesToModel(getPages());
+        const title = document.getElementById('document-title')?.value || '';
+        const model = normalizeModel({
+            title,
+            blocks,
+            pageFormat: state.currentDoc.pageFormat || 'a4',
+            fontFamily: state.currentDoc.fontFamily,
+            updatedAt: Date.now()
+        });
+        validateModel(model);
+        console.log('[scriben:model:dump]', JSON.stringify(model, null, 2));
+        return model;
+    };
 
     // ── Bootstrap shared state ──────────────────────────────────────────────
     state.container = document.getElementById('pages-container');
@@ -161,6 +182,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ── PDF export button ───────────────────────────────────────────────────
     initPdfExport();
 
+    // ── File menu wiring (new doc, offline toggle, PDF/DOCX export) ────────
+    initCompat();
+
     // ── Global outside-click: close color picker & link tooltip ────────────
     document.addEventListener('mousedown', (e) => {
         if (isLinkTooltipVisible()) {
@@ -254,39 +278,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     bindMenuItem('menu-theme-auto', () => applyAppTheme('auto'));
     bindMenuItem('menu-theme-light', () => applyAppTheme('light'));
     bindMenuItem('menu-theme-dark', () => applyAppTheme('dark'));
-
-    // ── File menu items ─────────────────────────────────────────────────────
-    const newDocBtn = document.getElementById('menu-new-doc');
-    if (newDocBtn) {
-        newDocBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            const newId = 'doc_' + crypto.randomUUID();
-            window.location.href = `${window.location.pathname}?id=${newId}`;
-        });
-    }
-
-    const toggleOfflineBtn = document.getElementById('menu-toggle-offline');
-    const fileDropdownEl = document.getElementById('file-dropdown');
-    if (toggleOfflineBtn) {
-        toggleOfflineBtn.addEventListener('click', async (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            state.currentDoc.offlineUse = (state.currentDoc.offlineUse !== false) ? false : true;
-            await saveDocument(state.docId, state.currentDoc);
-            updateOfflineMenuCheckmark(state.currentDoc.offlineUse);
-            if (fileDropdownEl) fileDropdownEl.style.display = 'none';
-        });
-    }
-
-    const exportPdfBtnMenu = document.getElementById('menu-export-pdf');
-    const exportPdfBtn = document.getElementById('exportPdfBtn');
-    if (exportPdfBtnMenu && exportPdfBtn) {
-        exportPdfBtnMenu.addEventListener('click', (e) => {
-            e.preventDefault();
-            exportPdfBtn.click();
-            if (fileDropdownEl) fileDropdownEl.style.display = 'none';
-        });
-    }
 
     // ── Document title auto-save ─────────────────────────────────────────────
     const documentTitleInput = document.getElementById('document-title');

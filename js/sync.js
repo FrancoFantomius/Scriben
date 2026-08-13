@@ -157,6 +157,10 @@ export async function saveDocument(id, docObj) {
       if (docObj.fontFamily) {
         doc.fontFamily = docObj.fontFamily;
       }
+
+      if (docObj.model) {
+        doc.model = docObj.model;
+      }
       
       if (existingDoc) {
         doc._rev = existingDoc._rev;
@@ -239,6 +243,7 @@ export async function fetchDocumentContentFromCloud(id) {
     localDoc.content = payload.content || [];
     localDoc.title = payload.title || localDoc.title;
     if (payload.author) localDoc.author = payload.author;
+    if (payload.model) localDoc.model = payload.model;
     localDoc.updatedAt = payload.updatedAt || localDoc.updatedAt;
     await db.put(localDoc);
 
@@ -520,18 +525,6 @@ async function runSync() {
   if (onSyncStatusCallback) onSyncStatusCallback('syncing');
 
   try {
-    // 1. Process deletions
-    const deletedQueue = await getDeletedDocsQueue();
-    for (const docId of deletedQueue) {
-      try {
-        const filePath = `/Apps/Scriben/documents/${docId}.json`;
-        await filenClient.fs().rm({ path: filePath, permanent: true }).catch(() => {});
-        await filenClient.fs().rm({ path: `/Scriben/documents/${docId}.json`, permanent: true }).catch(() => {});
-        await removeFromDeletedDocsQueue(docId);
-      } catch (err) {
-        console.error(`[Sync] Failed to remote delete document ${docId}:`, err);
-      }
-    }
 
     // Helper: Upload single doc file to /Apps/Scriben/documents
     const uploadDocToFilen = async (localDoc) => {
@@ -549,6 +542,14 @@ async function runSync() {
         pageFormat: refreshedDoc.pageFormat || 'a4',
         createdAt: refreshedDoc.createdAt || Date.now()
       };
+
+      if (refreshedDoc.fontFamily) {
+        payload.fontFamily = refreshedDoc.fontFamily;
+      }
+
+      if (refreshedDoc.model) {
+        payload.model = refreshedDoc.model;
+      }
 
       const parentUUID = await filenClient.fs().pathToItemUUID({
         path: '/Apps/Scriben/documents',
@@ -607,7 +608,7 @@ async function runSync() {
       });
     };
 
-    // 2. Read remote index file (/Apps/Scriben/index.json)
+    // 1. Read remote index file (/Apps/Scriben/index.json)
     let remoteIndexData = null;
     try {
       const indexContent = await filenClient.fs().readFile({ path: '/Apps/Scriben/index.json' });
@@ -616,7 +617,7 @@ async function runSync() {
       remoteIndexData = null;
     }
 
-    // 3. Load all local documents
+    // 2. Load all local documents
     const localResult = await db.allDocs({
       include_docs: true,
       startkey: 'doc_',
@@ -667,22 +668,28 @@ async function runSync() {
       indexDirty = true;
     }
 
-    // Reconcile Remote Index with Local Database
-    const activeDeletedQueue = await getDeletedDocsQueue();
+    // 3. Process deletions against the remote index
+    const deletedQueue = await getDeletedDocsQueue();
+    for (const docId of deletedQueue) {
+      try {
+        await filenClient.fs().rm({ path: `/Apps/Scriben/documents/${docId}.json`, permanent: true }).catch(() => {});
+        await filenClient.fs().rm({ path: `/Scriben/documents/${docId}.json`, permanent: true }).catch(() => {});
+        if (remoteIndexMap.has(docId)) {
+          remoteIndexMap.delete(docId);
+          indexDirty = true;
+        }
+        try {
+          const localDoc = await db.get(docId);
+          await db.remove(localDoc);
+        } catch (e) {}
+        await removeFromDeletedDocsQueue(docId);
+      } catch (err) {
+        console.error(`[Sync] Failed to remote delete document ${docId}:`, err);
+      }
+    }
 
     // A) Process Remote Index Items
     for (const [docId, remoteDoc] of remoteIndexMap.entries()) {
-      if (activeDeletedQueue.includes(docId)) {
-        // Document deleted locally while offline
-        remoteIndexMap.delete(docId);
-        indexDirty = true;
-        try {
-          await filenClient.fs().rm({ path: `/Apps/Scriben/documents/${docId}.json`, permanent: true }).catch(() => {});
-          await removeFromDeletedDocsQueue(docId);
-        } catch (e) {}
-        continue;
-      }
-
       const localDoc = localMap.get(docId);
 
       if (!localDoc) {
@@ -738,21 +745,16 @@ async function runSync() {
     // B) Process Local-only Documents (not in remote index)
     for (const localDoc of localDocs) {
       if (!remoteIndexMap.has(localDoc._id)) {
-        if (activeDeletedQueue.includes(localDoc._id)) {
-          await db.remove(localDoc);
-          await removeFromDeletedDocsQueue(localDoc._id);
-        } else {
-          // Upload local document to cloud
-          await uploadDocToFilen(localDoc);
-          const refreshed = await db.get(localDoc._id);
-          remoteIndexMap.set(localDoc._id, {
-            id: refreshed._id,
-            title: refreshed.title,
-            updatedAt: refreshed.updatedAt,
-            author: refreshed.author || settings.userId || 'Anonymous'
-          });
-          indexDirty = true;
-        }
+        // Upload local document to cloud
+        await uploadDocToFilen(localDoc);
+        const refreshed = await db.get(localDoc._id);
+        remoteIndexMap.set(localDoc._id, {
+          id: refreshed._id,
+          title: refreshed.title,
+          updatedAt: refreshed.updatedAt,
+          author: refreshed.author || settings.userId || 'Anonymous'
+        });
+        indexDirty = true;
       }
     }
 
