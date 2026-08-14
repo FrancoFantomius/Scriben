@@ -273,6 +273,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             saveContent();
         });
     });
+    bindMenuItem('menu-format-custom', () => {
+        applyPageFormat('custom');
+        paginate();
+        saveContent();
+    });
 
     // ── Theme menu items ────────────────────────────────────────────────────
     bindMenuItem('menu-theme-auto', () => applyAppTheme('auto'));

@@ -1,0 +1,27 @@
+{
+    "version": 1,
+    "legend": {
+        "OK": "Verified by the round-trip corpus (import → export → import structurally identical)",
+        "MAP": "Verified with a deliberate, lossless-in-practice mapping (e.g. Google fonts → Word system equivalents)",
+        "PARTIAL": "Preserved with some normalization (rendered value, not the original construct)",
+        "VIEW": "Imported for viewing only"
+    },
+    "features": [
+        { "code": "paragraphs", "label": "Paragraphs / text", "import": "OK", "export": "OK", "roundtrip": "OK" },
+        { "code": "inline-format", "label": "Bold / italic / underline", "import": "OK", "export": "OK", "roundtrip": "OK" },
+        { "code": "colors", "label": "Text & highlight colors", "import": "OK", "export": "OK", "roundtrip": "OK" },
+        { "code": "fonts", "label": "Fonts & sizes", "import": "OK", "export": "MAP", "roundtrip": "MAP" },
+        { "code": "alignment", "label": "Alignment", "import": "OK", "export": "OK", "roundtrip": "OK" },
+        { "code": "lists", "label": "Bullet / numbered lists", "import": "OK", "export": "OK", "roundtrip": "OK" },
+        { "code": "links", "label": "External & anchor links", "import": "OK", "export": "OK", "roundtrip": "OK" },
+        { "code": "images", "label": "Inline images", "import": "OK", "export": "OK", "roundtrip": "OK" },
+        { "code": "tables", "label": "Tables", "import": "OK", "export": "OK", "roundtrip": "OK" },
+        { "code": "page-setup", "label": "Page setup / sections", "import": "OK", "export": "OK", "roundtrip": "OK" },
+        { "code": "headers-footers", "label": "Headers & footers", "import": "OK", "export": "OK", "roundtrip": "OK" },
+        { "code": "page-numbers", "label": "Page numbers", "import": "OK", "export": "OK", "roundtrip": "OK" },
+        { "code": "footnotes", "label": "Footnotes & endnotes", "import": "OK", "export": "OK", "roundtrip": "OK" },
+        { "code": "comments", "label": "Comments", "import": "OK", "export": "OK", "roundtrip": "OK" },
+        { "code": "revisions", "label": "Tracked changes", "import": "OK", "export": "OK", "roundtrip": "OK" },
+        { "code": "styles", "label": "Paragraph / character styles", "import": "PARTIAL", "export": "PARTIAL", "roundtrip": "PARTIAL" }
+    ]
+}

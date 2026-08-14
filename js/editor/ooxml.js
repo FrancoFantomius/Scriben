@@ -51,7 +51,8 @@ export const WARNINGS = {
     MISSING_DOCUMENT: { code: 'MISSING_DOCUMENT', message: 'The .docx file is missing its document body.' },
     XML_PARSE_ERROR: { code: 'XML_PARSE_ERROR', message: 'A part of the document could not be read.' },
     MISSING_RELS: { code: 'MISSING_RELS', message: 'The document has no relationship map.' },
-    TABLE_DEFERRED: { code: 'TABLE_DEFERRED', message: 'Tables were skipped (coming soon).' },
+    TABLE_DEFERRED: { code: 'TABLE_DEFERRED', message: 'A table could not be fully parsed.' },
+    NESTED_TABLE_SKIPPED: { code: 'NESTED_TABLE_SKIPPED', message: 'Nested tables were skipped.' },
     TRACKED_CHANGE_DEFERRED: { code: 'TRACKED_CHANGE_DEFERRED', message: 'Tracked changes were flattened to plain text.' },
     FOOTNOTE_DEFERRED: { code: 'FOOTNOTE_DEFERRED', message: 'Footnotes and endnotes were skipped.' },
     CUSTOM_XML_SKIPPED: { code: 'CUSTOM_XML_SKIPPED', message: 'Custom XML content was skipped.' },
@@ -63,8 +64,7 @@ export const WARNINGS = {
     LEGACY_IMAGE: { code: 'LEGACY_IMAGE', message: 'A legacy image was imported.' },
     IMAGE_SIZE_UNUSUAL: { code: 'IMAGE_SIZE_UNUSUAL', message: 'An image has an unusual size.' },
     UNKNOWN_ALIGNMENT: { code: 'UNKNOWN_ALIGNMENT', message: 'An unsupported alignment was used.' },
-    UNKNOWN_STYLE: { code: 'UNKNOWN_STYLE', message: 'A paragraph style was not recognized.' },
-    FALLBACK_USED: { code: 'FALLBACK_USED', message: 'The document was opened with the fallback converter.' }
+    UNKNOWN_STYLE: { code: 'UNKNOWN_STYLE', message: 'A paragraph style was not recognized.' }
 };
 
 export function warn(ctx, code) {
@@ -145,7 +145,14 @@ export async function unzipParts(buffer) {
         const norm = normalizePartName(key);
         if (norm) parts.set(norm, files[key]);
     }
-    if (!parts.has('word/document.xml')) {
+    let hasDoc = false;
+    for (const key of parts.keys()) {
+        if (key.toLowerCase() === 'word/document.xml') {
+            hasDoc = true;
+            break;
+        }
+    }
+    if (!hasDoc) {
         throw { code: 'MISSING_DOCUMENT', message: WARNINGS.MISSING_DOCUMENT.message };
     }
     return parts;
@@ -172,7 +179,7 @@ export function createReader(parts, warnings = []) {
             if (!bytes) return null;
             let xml;
             try {
-                xml = new TextDecoder('utf-8').decode(bytes);
+                xml = new TextDecoder('utf-8').decode(bytes).replace(/^\uFEFF/, '');
             } catch (err) {
                 warn({ warnings }, 'XML_PARSE_ERROR');
                 return null;
@@ -197,7 +204,12 @@ export function createReader(parts, warnings = []) {
         getBytes(path) {
             const norm = normalizePartName(path);
             if (!norm) return null;
-            return this.parts.get(norm) || null;
+            if (this.parts.has(norm)) return this.parts.get(norm);
+            const lower = norm.toLowerCase();
+            for (const [k, v] of this.parts.entries()) {
+                if (k.toLowerCase() === lower) return v;
+            }
+            return null;
         },
         /**
          * Lists part names matching a regex.
@@ -343,14 +355,37 @@ export function getCoreTitle(reader) {
 
 // ─── Unit conversions ─────────────────────────────────────────────────────────
 
+/**
+ * Converts a universal measure (plain twips number, or a number with a
+ * mm/cm/pt/in suffix — docx writes the latter verbatim for page geometry)
+ * into twips.
+ * @param {string|number} v
+ * @returns {number|null}
+ */
+function measureToTwips(v) {
+    if (v == null) return null;
+    const m = String(v).match(/^([\d.]+)\s*(mm|cm|pt|in)?$/i);
+    if (!m) return null;
+    const n = parseFloat(m[1]);
+    if (!isFinite(n)) return null;
+    const unit = (m[2] || '').toLowerCase();
+    switch (unit) {
+        case 'mm': return Math.round(n * 72 * 20 / 25.4);
+        case 'cm': return Math.round(n * 72 * 20 / 2.54);
+        case 'in': return Math.round(n * 1440);
+        case 'pt': return Math.round(n * 20);
+        default: return n; // already twips
+    }
+}
+
 function twipsToPt(v) {
-    const n = parseInt(v, 10);
-    return isFinite(n) ? Math.round((n / 20) * 100) / 100 : null;
+    const tw = measureToTwips(v);
+    return tw == null ? null : Math.round((tw / 20) * 100) / 100;
 }
 
 function twipsToMm(v) {
-    const n = parseInt(v, 10);
-    return isFinite(n) ? Math.round((n * 25.4 / 1440) * 10) / 10 : null;
+    const tw = measureToTwips(v);
+    return tw == null ? null : Math.round((tw * 25.4 / 1440) * 10) / 10;
 }
 
 function emuToPx(emu) {
@@ -386,10 +421,10 @@ export function walkBody(bodyEl, ctx) {
                 blocks.push(...parseParagraph(node, ctx));
                 break;
             case 'tbl':
-                warn(ctx, 'TABLE_DEFERRED');
+                blocks.push(parseTable(node, ctx));
                 break;
             case 'sectPr':
-                parseSectPr(node, ctx);
+                blocks.push(parseSectPr(node, ctx));
                 break;
             case 'bookmarkStart': {
                 const id = attr(node, 'w:id');
@@ -404,10 +439,20 @@ export function walkBody(bodyEl, ctx) {
                 break;
             }
             case 'ins':
-            case 'del':
-                warn(ctx, 'TRACKED_CHANGE_DEFERRED');
+            case 'del': {
+                // Body-level tracked change: thread the change into ctx so
+                // paragraphs rendered beneath it wrap their text runs as
+                // insRun/delRun. Restored afterwards for sibling content.
+                const prevChange = ctx.change;
+                ctx.change = {
+                    kind: name === 'del' ? 'delete' : 'insert',
+                    author: attr(node, 'w:author') || '',
+                    date: attr(node, 'w:date') || ''
+                };
                 blocks.push(...walkBody(node, ctx));
+                ctx.change = prevChange;
                 break;
+            }
             case 'sdt': {
                 const content = child(node, 'sdtContent');
                 if (content) blocks.push(...walkBody(content, ctx));
@@ -416,6 +461,14 @@ export function walkBody(bodyEl, ctx) {
             case 'customXml':
                 warn(ctx, 'CUSTOM_XML_SKIPPED');
                 break;
+            case 'AlternateContent':
+            case 'alternateContent': {
+                const choice = childNS(node, NS.mc, 'Choice') || child(node, 'Choice');
+                const fallback = childNS(node, NS.mc, 'Fallback') || child(node, 'Fallback');
+                const target = choice || fallback;
+                if (target) blocks.push(...walkBody(target, ctx));
+                break;
+            }
             default:
                 break;
         }
@@ -443,9 +496,16 @@ function collectRuns(paragraphEl, ctx) {
             if (name === 'r') out.push({ el: node, type: 'run' });
             else if (name === 'hyperlink') out.push({ el: node, type: 'hyperlink' });
             else if (name === 'ins' || name === 'del') out.push({ el: node, type: name });
+            else if (name === 'commentRangeStart') out.push({ el: node, type: 'commentRangeStart' });
+            else if (name === 'commentRangeEnd') out.push({ el: node, type: 'commentRangeEnd' });
             else if (name === 'sdt') {
                 const content = child(node, 'sdtContent');
                 if (content) walk(content);
+            } else if (name === 'AlternateContent' || name === 'alternateContent') {
+                const choice = childNS(node, NS.mc, 'Choice') || child(node, 'Choice');
+                const fallback = childNS(node, NS.mc, 'Fallback') || child(node, 'Fallback');
+                const target = choice || fallback;
+                if (target) walk(target);
             } else if (name === 'bookmarkStart') {
                 const id = attr(node, 'w:id');
                 const bmName = attr(node, 'w:name');
@@ -491,8 +551,9 @@ const HIGHLIGHT_COLORS = {
 };
 
 /**
- * Merges adjacent runs with identical formatting. Preserves footnoteRef
- * markers (which carry no text/image). Drops empty runs.
+ * Merges adjacent runs with identical formatting. Preserves marker runs
+ * (pageNumber, footnoteRef, commentRangeStart, commentRangeEnd) and
+ * tracked-change runs (insRun, delRun) verbatim. Drops empty runs.
  * @param {object[]} runs
  * @returns {object[]}
  */
@@ -500,14 +561,16 @@ function mergeRunsLocal(runs) {
     const out = [];
     for (const run of runs) {
         if (!run || typeof run !== 'object') continue;
-        if (run.type === 'footnoteRef') {
+        if (run.type === 'pageNumber' || run.type === 'footnoteRef' ||
+            run.type === 'commentRangeStart' || run.type === 'commentRangeEnd' ||
+            run.type === 'insRun' || run.type === 'delRun' || run.formatChange) {
             out.push({ ...run });
             continue;
         }
         if (run.image === undefined && run.text === undefined) continue;
         if (run.image === undefined && run.text === '') continue;
         const prev = out[out.length - 1];
-        if (prev && prev.type !== 'footnoteRef' && !prev.image && !run.image && runsEqual(prev, run)) {
+        if (prev && !prev.type && !prev.formatChange && !prev.image && !run.image && runsEqual(prev, run)) {
             prev.text += run.text;
         } else {
             out.push({ ...run });
@@ -640,13 +703,25 @@ function parseRPr(rPr, ctx) {
     const color = child(rPr, 'color');
     if (color) {
         const val = attr(color, 'w:val');
-        if (val && val !== 'auto') out.color = '#' + val;
+        const themeColor = attr(color, 'w:themeColor');
+        if (themeColor) {
+            const resolved = resolveThemeColor(themeColor, attr(color, 'w:themeShade'), attr(color, 'w:themeTint'), ctx);
+            if (resolved) out.color = resolved;
+        }
+        if (!out.color && val && val !== 'auto') out.color = '#' + val;
     }
 
     const shd = child(rPr, 'shd');
     if (shd) {
-        const fill = attr(shd, 'w:fill');
+        let fill = attr(shd, 'w:fill');
         if (fill && fill !== 'auto') out.backgroundColor = '#' + fill;
+        else {
+            const themeFill = attr(shd, 'w:themeFill');
+            if (themeFill) {
+                const resolved = resolveThemeColor(themeFill, attr(shd, 'w:themeShade'), attr(shd, 'w:themeTint'), ctx);
+                if (resolved) out.backgroundColor = resolved;
+            }
+        }
     }
 
     const sz = child(rPr, 'sz');
@@ -693,6 +768,18 @@ function parseRPr(rPr, ctx) {
         if (val) out.styleId = val;
     }
 
+    // w:rPrChange records the prior formatting for a tracked format change.
+    // The revision's author/date are preserved on the run so the exporter can
+    // re-emit a w:rPrChange; the exact prior props are intentionally not
+    // mirrored (format changes are preserved, not fully round-tripped).
+    const rPrChange = child(rPr, 'rPrChange');
+    if (rPrChange) {
+        out.formatChange = {
+            author: attr(rPrChange, 'w:author') || '',
+            date: attr(rPrChange, 'w:date') || ''
+        };
+    }
+
     return out;
 }
 
@@ -716,17 +803,21 @@ function extractText(tEl, paragraphEl) {
  * @param {Element} rEl
  * @param {object} ctx
  * @param {Element} paragraphEl
+ * @param {object} [inherit] paragraph-level default run props (styles)
  * @returns {object[]}
  */
-function parseRun(rEl, ctx, paragraphEl) {
+function parseRun(rEl, ctx, paragraphEl, inherit) {
     const rPr = child(rEl, 'rPr');
-    const props = parseRPr(rPr, ctx);
+    const props = resolveRunProps(parseRPr(rPr, ctx), inherit, ctx);
     const out = [];
     for (const node of Array.from(rEl.childNodes)) {
         if (node.nodeType !== Node.ELEMENT_NODE) continue;
         const name = localNameOf(node);
         switch (name) {
-            case 't': {
+            case 't':
+            case 'delText': {
+                // `w:delText` carries deleted text inside a tracked-delete run;
+                // the surrounding w:del container wraps the result in a delRun.
                 const t = extractText(node, paragraphEl);
                 if (t !== '') out.push({ text: t, ...props });
                 break;
@@ -751,11 +842,26 @@ function parseRun(rEl, ctx, paragraphEl) {
                 break;
             case 'lastRenderedPageBreak':
                 break;
+            case 'fldChar': {
+                const type = attr(node, 'w:fldCharType');
+                if (type) out.push({ __fldChar: type });
+                break;
+            }
+            case 'instrText': {
+                const txt = node.textContent || '';
+                if (txt.trim() !== '') out.push({ __fldText: txt });
+                break;
+            }
             case 'footnoteReference':
             case 'endnoteReference': {
-                const id = attr(node, 'w:id');
-                warn(ctx, 'FOOTNOTE_DEFERRED');
-                out.push({ type: 'footnoteRef', id: id || '' });
+                const id = attr(node, 'w:id') || '';
+                const isEndnote = name === 'endnoteReference';
+                const key = isEndnote ? 'e' + id : id;
+                const available = isEndnote
+                    ? !!(ctx.endnoteMap && ctx.endnoteMap.has(id))
+                    : !!(ctx.footnoteMap && ctx.footnoteMap.has(id));
+                if (!available) warn(ctx, 'FOOTNOTE_DEFERRED');
+                out.push({ type: 'footnoteRef', id: key });
                 break;
             }
             case 'drawing': {
@@ -769,9 +875,60 @@ function parseRun(rEl, ctx, paragraphEl) {
                 if (img) out.push(img);
                 break;
             }
+            case 'AlternateContent':
+            case 'alternateContent': {
+                const choice = childNS(node, NS.mc, 'Choice') || child(node, 'Choice');
+                const fallback = childNS(node, NS.mc, 'Fallback') || child(node, 'Fallback');
+                const target = choice || fallback;
+                if (target) {
+                    const drawing = child(target, 'drawing') || childNS(target, NS.w, 'drawing');
+                    if (drawing) {
+                        const img = parseDrawing(drawing, ctx);
+                        if (img) out.push(img);
+                    } else {
+                        const pict = child(target, 'pict') || child(target, 'object');
+                        if (pict) {
+                            const img = parseLegacyImage(pict, ctx);
+                            if (img) out.push(img);
+                        }
+                    }
+                }
+                break;
+            }
             default:
                 break;
         }
+    }
+    return out;
+}
+
+/**
+ * Resolves PAGE (and other) fields from a flattened run stream into a single
+ * `{ type: 'pageNumber' }` marker run. Non-page fields are dropped.
+ * @param {object[]} runs
+ * @returns {object[]}
+ */
+function resolveFields(runs) {
+    const hasField = (runs || []).some(r => r && (r.__fldChar || r.__fldText));
+    if (!hasField) return runs;
+    const out = [];
+    let i = 0;
+    while (i < runs.length) {
+        const r = runs[i];
+        if (r && r.__fldChar === 'begin') {
+            let j = i + 1;
+            let instr = null;
+            while (j < runs.length && runs[j].__fldChar !== 'end') {
+                if (runs[j] && runs[j].__fldText) instr = runs[j].__fldText;
+                j++;
+            }
+            if (/PAGE/i.test(String(instr || ''))) out.push({ type: 'pageNumber' });
+            i = j + 1;
+            continue;
+        }
+        if (r && (r.__fldChar || r.__fldText)) { i++; continue; }
+        out.push(r);
+        i++;
     }
     return out;
 }
@@ -782,9 +939,10 @@ function parseRun(rEl, ctx, paragraphEl) {
  * @param {Element} hlEl
  * @param {object} ctx
  * @param {Element} paragraphEl
+ * @param {object} [inherit] paragraph-level default run props
  * @returns {object[]}
  */
-function parseLink(hlEl, ctx, paragraphEl) {
+function parseLink(hlEl, ctx, paragraphEl, inherit) {
     const rId = attr(hlEl, 'r:id');
     const anchor = attr(hlEl, 'w:anchor');
 
@@ -792,12 +950,12 @@ function parseLink(hlEl, ctx, paragraphEl) {
     for (const node of Array.from(hlEl.childNodes)) {
         if (node.nodeType !== Node.ELEMENT_NODE) continue;
         const name = localNameOf(node);
-        if (name === 'r') childRuns.push(...parseRun(node, ctx, paragraphEl));
+        if (name === 'r') childRuns.push(...parseRun(node, ctx, paragraphEl, inherit));
         else if (name === 'ins' || name === 'del') {
             warn(ctx, 'TRACKED_CHANGE_DEFERRED');
             for (const sub of Array.from(node.childNodes)) {
                 if (sub.nodeType === Node.ELEMENT_NODE && localNameOf(sub) === 'r') {
-                    childRuns.push(...parseRun(sub, ctx, paragraphEl));
+                    childRuns.push(...parseRun(sub, ctx, paragraphEl, inherit));
                 }
             }
         } else if (name === 'sdt') {
@@ -805,7 +963,7 @@ function parseLink(hlEl, ctx, paragraphEl) {
             if (content) {
                 for (const sub of Array.from(content.childNodes)) {
                     if (sub.nodeType === Node.ELEMENT_NODE && localNameOf(sub) === 'r') {
-                        childRuns.push(...parseRun(sub, ctx, paragraphEl));
+                        childRuns.push(...parseRun(sub, ctx, paragraphEl, inherit));
                     }
                 }
             }
@@ -982,49 +1140,421 @@ function classifyFormat(widthMM, heightMM) {
 }
 
 /**
- * Parses `w:sectPr` into `ctx.pageSetup` (last body-level sectPr wins).
+ * Parses `w:sectPr` into a full `section` model block (exact page size,
+ * margins, header/footer blocks, page-number flag) and mirrors the setup
+ * into `ctx.pageSetup` for backward compatibility (last body-level sectPr
+ * wins).
  * @param {Element} sectPr
  * @param {object} ctx
+ * @returns {object} section block
  */
 export function parseSectPr(sectPr, ctx) {
-    const pgSz = child(sectPr, 'pgSz');
-    if (!pgSz) return;
-    const wTwips = parseInt(attr(pgSz, 'w:w'), 10);
-    const hTwips = parseInt(attr(pgSz, 'w:h'), 10);
-    if (!isFinite(wTwips) || !isFinite(hTwips)) return;
+    const section = { type: 'section', pageFormat: 'a4', orientation: 'portrait', widthMM: 210, heightMM: 297 };
 
-    const orientation = attr(pgSz, 'w:orient') === 'landscape' ? 'landscape' : 'portrait';
-    let widthMM = twipsToMm(wTwips);
-    let heightMM = twipsToMm(hTwips);
-    if (orientation === 'landscape') {
-        // A landscape page is physically wider than tall. This normalizes both
-        // writers that store the long side in w:w and those that keep portrait
-        // dimensions with an orientation flag.
-        const max = Math.max(widthMM, heightMM);
-        const min = Math.min(widthMM, heightMM);
-        widthMM = max;
-        heightMM = min;
+    const pgSz = child(sectPr, 'pgSz');
+    if (pgSz) {
+        const wRaw = attr(pgSz, 'w:w');
+        const hRaw = attr(pgSz, 'w:h');
+        if (wRaw != null && hRaw != null) {
+            const wTwips = measureToTwips(wRaw);
+            const hTwips = measureToTwips(hRaw);
+            if (wTwips != null && hTwips != null) {
+                const orientation = attr(pgSz, 'w:orient') === 'landscape' ? 'landscape' : 'portrait';
+                section.orientation = orientation;
+                let widthMM = twipsToMm(wTwips);
+                let heightMM = twipsToMm(hTwips);
+                if (orientation === 'landscape') {
+                    // Normalize both writers that store the long side in w:w and
+                    // those that keep portrait dimensions with an orientation flag.
+                    const max = Math.max(widthMM, heightMM);
+                    const min = Math.min(widthMM, heightMM);
+                    widthMM = max;
+                    heightMM = min;
+                }
+                section.widthMM = widthMM;
+                section.heightMM = heightMM;
+                section.pageFormat = classifyFormat(widthMM, heightMM);
+            }
+        }
     }
 
-    const margins = { top: null, bottom: null, left: null, right: null };
+    const margins = {};
     const pgMar = child(sectPr, 'pgMar');
     if (pgMar) {
         margins.top = twipsToMm(attr(pgMar, 'w:top'));
         margins.bottom = twipsToMm(attr(pgMar, 'w:bottom'));
         margins.left = twipsToMm(attr(pgMar, 'w:left'));
         margins.right = twipsToMm(attr(pgMar, 'w:right'));
+        const header = twipsToMm(attr(pgMar, 'w:header'));
+        const footer = twipsToMm(attr(pgMar, 'w:footer'));
+        if (header != null) section.headerDistance = header;
+        if (footer != null) section.footerDistance = footer;
     }
+    if (Object.keys(margins).length) section.margins = margins;
+
+    const header = resolvePartBlocks(sectPr, 'headerReference', ctx);
+    if (header) section.header = header;
+    const footer = resolvePartBlocks(sectPr, 'footerReference', ctx);
+    if (footer) section.footer = footer;
+
+    if (child(sectPr, 'pgNumType')) section.pageNumbering = true;
+    if (containsPageNumber(section.header)) section.pageNumbering = true;
+    if (containsPageNumber(section.footer)) section.pageNumbering = true;
 
     ctx.pageSetup = {
-        format: classifyFormat(widthMM, heightMM),
-        orientation,
-        widthMM,
-        heightMM,
-        margins
+        format: section.pageFormat,
+        orientation: section.orientation,
+        widthMM: section.widthMM,
+        heightMM: section.heightMM,
+        margins: {
+            top: margins.top != null ? margins.top : null,
+            bottom: margins.bottom != null ? margins.bottom : null,
+            left: margins.left != null ? margins.left : null,
+            right: margins.right != null ? margins.right : null
+        }
     };
+    return section;
 }
 
-// ─── T8. Basic list best effort ───────────────────────────────────────────────
+/**
+ * Resolves a `w:headerReference`/`w:footerReference` relationship to its
+ * part and walks that part (header/footer body) with the shared walker,
+ * attaching its blocks to the section. Falls back to null when unresolvable.
+ * @param {Element} sectPr
+ * @param {'headerReference'|'footerReference'} localName
+ * @param {object} ctx
+ * @returns {object[]|null}
+ */
+function resolvePartBlocks(sectPr, localName, ctx) {
+    const refs = children(sectPr, localName);
+    if (refs.length === 0) return null;
+    const ref = refs.find(r => (attr(r, 'w:type') || 'default') === 'default') || refs[0];
+    const rId = attr(ref, 'r:id');
+    const rel = rId ? ctx.rels.get(rId) : null;
+    if (!rel || !rel.target) return null;
+    const partPath = resolveRelTarget(rel);
+    if (!partPath || !ctx.reader.parts.has(partPath)) return null;
+    const doc = ctx.reader.getPart(partPath);
+    if (!doc) return null;
+    // Header/footer parts reference their own media via a sibling rels file.
+    const subCtx = { ...ctx, rels: parseRels(ctx.reader.getPart(relsPathFor(partPath))) };
+    return walkBody(doc.documentElement, subCtx);
+}
+
+function relsPathFor(partPath) {
+    const parts = String(partPath).split('/');
+    const file = parts.pop();
+    return parts.concat('_rels', `${file}.rels`).join('/');
+}
+
+function containsPageNumber(blocks) {
+    return (blocks || []).some(b => (b.runs || []).some(r => r && r.type === 'pageNumber'));
+}
+
+// ─── T7. Styles, themes ───────────────────────────────────────────────────────
+
+/**
+ * Lazily loads `word/theme/theme1.xml` into a color map
+ * (theme color name → '#rrggbb'). Cached on ctx.
+ * @param {object} ctx
+ * @returns {object} { colors: Map<string, string> }
+ */
+function loadTheme(ctx) {
+    if (ctx.theme) return ctx.theme;
+    ctx.theme = { colors: new Map() };
+    const doc = ctx.reader.getPart('word/theme/theme1.xml');
+    if (!doc) return ctx.theme;
+    const scheme = doc.getElementsByTagNameNS(NS.a, 'clrScheme')[0];
+    if (!scheme) return ctx.theme;
+    for (const el of Array.from(scheme.children)) {
+        if (el.nodeType !== Node.ELEMENT_NODE) continue;
+        const name = localNameOf(el);
+        if (!name) continue;
+        const srgb = el.getElementsByTagNameNS(NS.a, 'srgbClr')[0];
+        let val = srgb ? attr(srgb, 'val') : null;
+        if (!val) {
+            const sys = el.getElementsByTagNameNS(NS.a, 'sysClr')[0];
+            val = sys ? (attr(sys, 'lastClr') || attr(sys, 'val')) : null;
+        }
+        if (val) ctx.theme.colors.set(name, String(val).toLowerCase());
+    }
+    return ctx.theme;
+}
+
+function hexWithShadeTint(hex, shade, tint) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+    if (!m) return null;
+    const comps = [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16));
+    let [r, g, b] = comps;
+    const shadeN = parseInt(shade, 10);
+    const tintN = parseInt(tint, 10);
+    if (isFinite(shadeN)) {
+        const f = Math.max(0, Math.min(100, shadeN)) / 100;
+        r = Math.round(r * f); g = Math.round(g * f); b = Math.round(b * f);
+    }
+    if (isFinite(tintN)) {
+        const f = Math.max(0, Math.min(100, tintN)) / 100;
+        r = Math.round(r + (255 - r) * f);
+        g = Math.round(g + (255 - g) * f);
+        b = Math.round(b + (255 - b) * f);
+    }
+    return '#' + [r, g, b].map(n => n.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Resolves a theme color reference (e.g. accent1) to a concrete color,
+ * applying an optional shade/tint. Returns null so the caller keeps the
+ * literal `w:val` (document default) instead.
+ * @param {string} themeColor
+ * @param {string|null} shade
+ * @param {string|null} tint
+ * @param {object} ctx
+ * @returns {string|null}
+ */
+function resolveThemeColor(themeColor, shade, tint, ctx) {
+    if (!themeColor) return null;
+    const base = loadTheme(ctx).colors.get(String(themeColor).toLowerCase());
+    if (!base) return null;
+    if (shade != null || tint != null) {
+        const modified = hexWithShadeTint(base, shade, tint);
+        if (modified) return modified;
+    }
+    return '#' + base;
+}
+
+/**
+ * Lazily loads `word/styles.xml` into a map of styleId → resolved props plus
+ * the docDefaults. Cached on ctx.
+ * @param {object} ctx
+ * @returns {object} { map, docDefaults: { pPr, rPr } }
+ */
+function loadStyles(ctx) {
+    if (ctx.styles) return ctx.styles;
+    ctx.styles = { map: new Map(), docDefaults: { pPr: {}, rPr: {} } };
+    const doc = ctx.reader.getPart('word/styles.xml');
+    if (!doc) return ctx.styles;
+    const root = doc.documentElement;
+    const dd = child(root, 'docDefaults');
+    if (dd) {
+        const rPrDefault = child(dd, 'rPrDefault');
+        const pPrDefault = child(dd, 'pPrDefault');
+        if (rPrDefault) ctx.styles.docDefaults.rPr = parseRPr(child(rPrDefault, 'rPr'), ctx);
+        if (pPrDefault) ctx.styles.docDefaults.pPr = parsePPr(child(pPrDefault, 'pPr'), ctx);
+    }
+    for (const style of doc.getElementsByTagNameNS(NS.w, 'style')) {
+        const id = attr(style, 'w:styleId');
+        if (!id) continue;
+        const info = {
+            type: attr(style, 'w:type') || 'paragraph',
+            basedOn: null,
+            pPr: {},
+            rPr: {}
+        };
+        const basedOn = child(style, 'basedOn');
+        if (basedOn) info.basedOn = attr(basedOn, 'w:val') || null;
+        info.pPr = parsePPr(child(style, 'pPr'), ctx);
+        info.rPr = parseRPr(child(style, 'rPr'), ctx);
+        ctx.styles.map.set(id, info);
+    }
+    return ctx.styles;
+}
+
+/**
+ * Walks the `basedOn` chain from a style to its base, returning the merged
+ * props for the requested kind ('pPr' | 'rPr'). Unresolvable styles
+ * contribute nothing (callers fall back to docDefaults).
+ * @param {string} styleId
+ * @param {object} ctx
+ * @param {'pPr'|'rPr'} kind
+ * @returns {object}
+ */
+function resolveStyleProps(styleId, ctx, kind) {
+    const styles = loadStyles(ctx);
+    const chain = [];
+    const seen = new Set();
+    let id = styleId;
+    while (id) {
+        if (seen.has(id)) break;
+        seen.add(id);
+        const info = styles.map.get(id);
+        if (!info) break;
+        chain.push(info);
+        id = info.basedOn || null;
+    }
+    const merged = { ...styles.docDefaults[kind] };
+    for (let i = chain.length - 1; i >= 0; i--) {
+        Object.assign(merged, chain[i][kind]);
+    }
+    return merged;
+}
+
+/**
+ * Effective run props: paragraph-inherited defaults, then the character
+ * style chain (if any), then the run's direct formatting.
+ * @param {object} direct
+ * @param {object} inherit paragraph-level default run props
+ * @param {object} ctx
+ * @returns {object}
+ */
+function resolveRunProps(direct, inherit, ctx) {
+    const out = { ...(inherit || {}) };
+    if (direct && direct.styleId) {
+        Object.assign(out, resolveStyleProps(direct.styleId, ctx, 'rPr'));
+    }
+    Object.assign(out, direct || {});
+    delete out.styleId;
+    return out;
+}
+
+// ─── T8. Tables ───────────────────────────────────────────────────────────────
+
+const BORDER_SIDE_NAMES = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'];
+
+function parseBorderSet(bordersEl) {
+    if (!bordersEl) return null;
+    const out = {};
+    let any = false;
+    for (const name of BORDER_SIDE_NAMES) {
+        const el = bordersEl.getElementsByTagNameNS(NS.w, name)[0];
+        if (!el) continue;
+        const style = attr(el, 'w:val');
+        if (!style || style === 'nil' || style === 'none') continue;
+        const border = { style: String(style) };
+        const size = parseInt(attr(el, 'w:sz'), 10);
+        if (isFinite(size)) border.size = size;
+        const color = attr(el, 'w:color');
+        if (color && color !== 'auto') border.color = color;
+        out[name] = border;
+        any = true;
+    }
+    return any ? out : null;
+}
+
+/**
+ * Parses `w:tbl` into a model `table` block (rows × cells, merging flags,
+ * shading, borders, table width/alignment).
+ * @param {Element} tblEl
+ * @param {object} ctx
+ * @returns {object}
+ */
+function parseTable(tblEl, ctx) {
+    const out = { type: 'table', rows: [] };
+
+    const tblPr = child(tblEl, 'tblPr');
+    if (tblPr) {
+        const tblW = child(tblPr, 'tblW');
+        if (tblW) {
+            const wVal = attr(tblW, 'w:w');
+            const type = attr(tblW, 'w:type');
+            if (type === 'pct' && wVal != null) {
+                const raw = String(wVal);
+                const hasSuffix = /%$/.test(raw);
+                const n = parseFloat(raw);
+                const pct = hasSuffix ? Math.round(n * 10) / 10 : Math.round((n / 50) * 10) / 10;
+                if (isFinite(pct) && pct > 0) out.width = pct + '%';
+            } else if (type === 'dxa' && wVal != null) {
+                const pt = twipsToPt(wVal);
+                if (pt != null && pt > 0) out.width = pt + 'pt';
+            }
+        }
+        const jc = child(tblPr, 'jc');
+        if (jc) {
+            const align = mapAlignment(attr(jc, 'w:val'));
+            if (align && align !== 'justify') out.alignment = align;
+        }
+        const borders = parseBorderSet(child(tblPr, 'tblBorders'));
+        if (borders) out.borders = borders;
+    }
+
+    const rows = [];
+    for (const node of Array.from(tblEl.childNodes)) {
+        if (node.nodeType !== Node.ELEMENT_NODE) continue;
+        if (localNameOf(node) !== 'tr') continue;
+        rows.push(parseTableRow(node, ctx));
+    }
+    out.rows = rows;
+    let cols = 0;
+    for (const row of rows) {
+        let width = 0;
+        for (const cell of row) {
+            width += (cell && typeof cell === 'object' && Number.isInteger(cell.gridSpan)) ? cell.gridSpan : 1;
+        }
+        cols = Math.max(cols, width);
+    }
+    out.cols = cols;
+    return out;
+}
+
+function parseTableRow(trEl, ctx) {
+    const cells = [];
+    for (const node of Array.from(trEl.childNodes)) {
+        if (node.nodeType !== Node.ELEMENT_NODE) continue;
+        if (localNameOf(node) !== 'tc') continue;
+        cells.push(parseTableCell(node, ctx));
+    }
+    return cells;
+}
+
+function parseTableCell(tcEl, ctx) {
+    const cell = {};
+    const tcPr = child(tcEl, 'tcPr');
+    if (tcPr) {
+        const gridSpan = child(tcPr, 'gridSpan');
+        if (gridSpan) {
+            const v = parseInt(attr(gridSpan, 'w:val'), 10);
+            if (isFinite(v) && v > 1) cell.gridSpan = v;
+        }
+        const vMerge = child(tcPr, 'vMerge');
+        if (vMerge) {
+            cell.vMerge = (attr(vMerge, 'w:val') || 'continue') === 'restart' ? 'restart' : 'continue';
+        }
+        const shd = child(tcPr, 'shd');
+        if (shd) {
+            const fill = attr(shd, 'w:fill');
+            if (fill && fill !== 'auto') cell.shading = '#' + fill;
+            else {
+                const themeFill = attr(shd, 'w:themeFill');
+                if (themeFill) {
+                    const resolved = resolveThemeColor(themeFill, null, null, ctx);
+                    if (resolved) cell.shading = resolved;
+                }
+            }
+        }
+        const tcW = child(tcPr, 'tcW');
+        if (tcW) {
+            const wVal = attr(tcW, 'w:w');
+            const type = attr(tcW, 'w:type');
+            if (type === 'dxa' && wVal != null) {
+                const pt = twipsToPt(wVal);
+                if (pt != null && pt > 0) cell.width = pt + 'pt';
+            }
+        }
+    }
+
+    const texts = [];
+    for (const node of Array.from(tcEl.childNodes)) {
+        if (node.nodeType !== Node.ELEMENT_NODE) continue;
+        const name = localNameOf(node);
+        if (name === 'p') {
+            for (const block of parseParagraph(node, ctx)) {
+                if (block.type === 'paragraph' || block.type === 'heading') {
+                    const t = (block.runs || []).map(r => r.text ?? '').join('');
+                    texts.push(t);
+                }
+            }
+        } else if (name === 'tbl') {
+            warn(ctx, 'NESTED_TABLE_SKIPPED');
+        }
+    }
+
+    const text = texts.join('\n');
+    if (text !== '') cell.text = text;
+    const hasProps = cell.shading !== undefined || cell.gridSpan !== undefined || cell.vMerge !== undefined || cell.width !== undefined;
+    if (text === '' && !hasProps) return '';
+    return cell;
+}
+
+// ─── T8b. Basic list best effort ──────────────────────────────────────────────
 
 function loadNumbering(ctx) {
     if (ctx.numbering) return ctx.numbering;
@@ -1169,6 +1699,8 @@ function finalizeParagraph(block, props, ctx) {
             block.listType = resolved.listType;
             block.level = resolved.level;
             if (resolved.start != null) block.start = resolved.start;
+            if (resolved.indentLeft != null) block.indentLeft = resolved.indentLeft;
+            if (resolved.hanging != null) block.hanging = resolved.hanging;
         } else {
             warn(ctx, 'NUMBERING_DEFERRED');
         }
@@ -1176,35 +1708,69 @@ function finalizeParagraph(block, props, ctx) {
     return block;
 }
 
-function parseContainer(container, ctx, paragraphEl) {
+function parseContainer(container, ctx, paragraphEl, inherit) {
     const { el, type } = container;
-    if (type === 'run') return parseRun(el, ctx, paragraphEl);
-    if (type === 'hyperlink') return parseLink(el, ctx, paragraphEl);
-    // ins / del: flatten to plain text (stripped of change marks).
-    warn(ctx, 'TRACKED_CHANGE_DEFERRED');
+    if (type === 'run') return parseRun(el, ctx, paragraphEl, inherit);
+    if (type === 'hyperlink') return parseLink(el, ctx, paragraphEl, inherit);
+    if (type === 'commentRangeStart') {
+        return [{ type: 'commentRangeStart', id: attr(el, 'w:id') || '' }];
+    }
+    if (type === 'commentRangeEnd') {
+        return [{ type: 'commentRangeEnd', id: attr(el, 'w:id') || '' }];
+    }
+    // ins / del: preserve tracked changes as insRun/delRun runs carrying the
+    // change's author/date.
+    const change = {
+        kind: type === 'del' ? 'delete' : 'insert',
+        author: attr(el, 'w:author') || '',
+        date: attr(el, 'w:date') || ''
+    };
     const runs = [];
     for (const node of Array.from(el.childNodes)) {
         if (node.nodeType !== Node.ELEMENT_NODE) continue;
         const name = localNameOf(node);
-        if (name === 'r') runs.push(...parseRun(node, ctx, paragraphEl));
-        else if (name === 'hyperlink') runs.push(...parseLink(node, ctx, paragraphEl));
+        if (name === 'r') runs.push(...parseRun(node, ctx, paragraphEl, inherit));
+        else if (name === 'hyperlink') runs.push(...parseLink(node, ctx, paragraphEl, inherit));
         else if (name === 'sdt') {
             const content = child(node, 'sdtContent');
             if (content) {
                 for (const sub of Array.from(content.childNodes)) {
                     if (sub.nodeType === Node.ELEMENT_NODE && localNameOf(sub) === 'r') {
-                        runs.push(...parseRun(sub, ctx, paragraphEl));
+                        runs.push(...parseRun(sub, ctx, paragraphEl, inherit));
                     }
                 }
             }
         }
     }
-    return runs;
+    return wrapChange(runs, change);
+}
+
+/**
+ * Wraps plain text runs in a tracked-change wrapper when a change context is
+ * active. Runs that are already tracked, markers, or images are left as-is so
+ * the model stays valid (tracked runs require text).
+ * @param {object[]} runs
+ * @param {{kind:string, author?:string, date?:string}|null} change
+ * @returns {object[]}
+ */
+function wrapChange(runs, change) {
+    if (!change) return runs;
+    const type = change.kind === 'delete' ? 'delRun' : 'insRun';
+    return runs.map(r => {
+        if (!r || typeof r !== 'object') return r;
+        if (r.type === 'insRun' || r.type === 'delRun') return r;
+        if (r.text === undefined) return r;
+        const wrapped = { type, ...r };
+        if (change.author) wrapped.author = change.author;
+        if (change.date) wrapped.date = change.date;
+        return wrapped;
+    });
 }
 
 /**
  * Parses a `w:p` into one or more blocks. Manual page-break `<br>` splits a
- * paragraph into multiple blocks around a `pageBreak` block.
+ * paragraph into multiple blocks around a `pageBreak` block. A `w:sectPr`
+ * nested in `w:pPr` terminates the section and appends a `section` block.
  * @param {Element} pEl
  * @param {object} ctx
  * @returns {object[]}
@@ -1213,17 +1779,29 @@ function parseParagraph(pEl, ctx) {
     const pPr = child(pEl, 'pPr');
     const props = parsePPr(pPr, ctx);
 
+    // Resolve paragraph/character styles + docDefaults into effective props.
+    // Direct (inline) formatting always wins over style-derived values.
+    const styles = loadStyles(ctx);
+    const blockProps = { ...styles.docDefaults.pPr };
+    const inheritedRunProps = { ...styles.docDefaults.rPr };
+    if (props.styleId) {
+        Object.assign(blockProps, resolveStyleProps(props.styleId, ctx, 'pPr'));
+        Object.assign(inheritedRunProps, resolveStyleProps(props.styleId, ctx, 'rPr'));
+    }
+    Object.assign(blockProps, props);
+
     const blocks = [];
-    let current = makeParagraphBlock(props);
+    let current = makeParagraphBlock(blockProps);
     blocks.push(current);
 
-    if (props.pageBreakBefore) blocks.unshift({ type: 'pageBreak' });
+    if (blockProps.pageBreakBefore) blocks.unshift({ type: 'pageBreak' });
 
     for (const container of collectRuns(pEl, ctx)) {
-        for (const run of parseContainer(container, ctx, pEl)) {
+        const parsed = wrapChange(parseContainer(container, ctx, pEl, inheritedRunProps), ctx.change);
+        for (const run of parsed) {
             if (run && run.__pageBreak) {
                 blocks.push({ type: 'pageBreak' });
-                current = makeParagraphBlock(props);
+                current = makeParagraphBlock(blockProps);
                 blocks.push(current);
                 continue;
             }
@@ -1231,9 +1809,163 @@ function parseParagraph(pEl, ctx) {
         }
     }
 
+    const sectPr = pPr ? child(pPr, 'sectPr') : null;
+    if (sectPr) {
+        blocks.push(parseSectPr(sectPr, ctx));
+    }
+
     return blocks.map(b => {
-        if (b.type === 'pageBreak') return b;
+        if (b.type === 'pageBreak' || b.type === 'section') return b;
+        b.runs = resolveFields(b.runs);
         b.runs = mergeRunsLocal(b.runs);
-        return finalizeParagraph(b, props, ctx);
+        return finalizeParagraph(b, blockProps, ctx);
     });
+}
+
+// ─── T9. Annotations (footnotes, comments, tracked changes) ───────────────────
+
+/**
+ * Loads the annotation parts (footnotes.xml, endnotes.xml, comments.xml) into
+ * `ctx.footnoteMap` / `ctx.endnoteMap` / `ctx.commentMap`, keyed by their
+ * `w:id`. Special footnotes (separators, continuation markers) are skipped.
+ * Must run before `walkBody` so footnoteReference availability can be checked
+ * while runs are parsed. No-op on missing parts.
+ * @param {object} ctx
+ */
+export function loadAnnotationParts(ctx) {
+    ctx.footnoteMap = new Map();
+    ctx.endnoteMap = new Map();
+    ctx.commentMap = new Map();
+    const specialTypes = new Set(['separator', 'continuationSeparator', 'continuationNotice', 'separatorNote']);
+
+    const footnotePart = ctx.reader.getPart('word/footnotes.xml');
+    if (footnotePart) {
+        for (const fn of footnotePart.getElementsByTagNameNS(NS.w, 'footnote')) {
+            const id = attr(fn, 'w:id');
+            if (id == null) continue;
+            if (parseInt(id, 10) < 0) continue;
+            const typeEl = child(fn, 'type');
+            const fnType = attr(fn, 'w:type') || (typeEl ? attr(typeEl, 'w:val') : null);
+            if (fnType && specialTypes.has(fnType)) continue;
+            ctx.footnoteMap.set(String(id), walkBody(fn, ctx));
+        }
+    }
+
+    const endnotePart = ctx.reader.getPart('word/endnotes.xml');
+    if (endnotePart) {
+        for (const en of endnotePart.getElementsByTagNameNS(NS.w, 'endnote')) {
+            const id = attr(en, 'w:id');
+            if (id == null) continue;
+            if (parseInt(id, 10) < 0) continue;
+            const typeEl = child(en, 'type');
+            const fnType = attr(en, 'w:type') || (typeEl ? attr(typeEl, 'w:val') : null);
+            if (fnType && specialTypes.has(fnType)) continue;
+            ctx.endnoteMap.set(String(id), walkBody(en, ctx));
+        }
+    }
+
+    const commentsPart = ctx.reader.getPart('word/comments.xml');
+    if (commentsPart) {
+        for (const cm of commentsPart.getElementsByTagNameNS(NS.w, 'comment')) {
+            const id = attr(cm, 'w:id');
+            if (id == null) continue;
+            const author = attr(cm, 'w:author') || '';
+            const date = attr(cm, 'w:date') || '';
+            const blocks = walkBody(cm, ctx);
+            const text = blocks
+                .filter(b => b && (b.type === 'paragraph' || b.type === 'heading'))
+                .map(b => (b.runs || []).map(r => r.text ?? '').join(''))
+                .join('\n');
+            ctx.commentMap.set(String(id), { author, date, text });
+        }
+    }
+}
+
+/**
+ * Collects unique tracked-change records ({ kind, author?, date? }) from every
+ * run in a set of blocks, walking section header/footer blocks too. Records
+ * are de-duplicated on (kind, author, date); order is first occurrence.
+ * @param {object[]} blocks
+ * @returns {object[]}
+ */
+function collectRevisions(blocks) {
+    const revisions = [];
+    const seen = new Set();
+    const add = (kind, author, date) => {
+        const key = `${kind}\u0000${author || ''}\u0000${date || ''}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const r = { kind };
+        if (author) r.author = author;
+        if (date) r.date = date;
+        revisions.push(r);
+    };
+    const visitRuns = runs => {
+        for (const run of runs || []) {
+            if (!run || typeof run !== 'object') continue;
+            if (run.type === 'insRun') add('insert', run.author, run.date);
+            else if (run.type === 'delRun') add('delete', run.author, run.date);
+            if (run.formatChange) add('format', run.formatChange.author, run.formatChange.date);
+        }
+    };
+    const visitBlock = block => {
+        if (!block || typeof block !== 'object') return;
+        visitRuns(block.runs);
+        for (const key of ['header', 'footer']) {
+            for (const b of block[key] || []) visitBlock(b);
+        }
+    };
+    for (const b of blocks) visitBlock(b);
+    return revisions;
+}
+
+/**
+ * Returns the document's default run font family (from `styles.xml`
+ * docDefaults), or undefined when none is declared. Runs that carry this exact
+ * family are merely inheriting the document default, which the canonical model
+ * folds away for stable round-trip comparison.
+ * @param {object} ctx
+ * @returns {string|undefined}
+ */
+export function getDocDefaultFont(ctx) {
+    return loadStyles(ctx).docDefaults.rPr.fontFamily;
+}
+
+/**
+ * Builds the canonical annotation sections for a document: `footnotes`
+ * ({ id, index, blocks[] }; endnotes merged in with an `e`-prefixed id so the
+ * two id spaces never collide), `comments` ({ id, author?, date?, text }) and
+ * `revisions` (deduplicated tracked-change records derived from the runs).
+ * @param {object} ctx
+ * @param {object[]} [blocks] body blocks (used to derive the revisions list)
+ * @returns {{footnotes:object[], comments:object[], revisions:object[]}}
+ */
+export function buildAnnotationSections(ctx, blocks = []) {
+    const footnotes = [];
+    const footnoteIds = Array.from((ctx.footnoteMap || new Map()).keys()).sort();
+    footnoteIds.forEach((id, i) => {
+        footnotes.push({ id, index: i + 1, blocks: ctx.footnoteMap.get(id) });
+    });
+    const endnoteIds = Array.from((ctx.endnoteMap || new Map()).keys()).sort();
+    endnoteIds.forEach((id, i) => {
+        footnotes.push({ id: 'e' + id, index: footnotes.length + i + 1, blocks: ctx.endnoteMap.get(id) });
+    });
+
+    const comments = [];
+    Array.from((ctx.commentMap || new Map()).keys())
+        .sort()
+        .forEach(id => {
+            const c = ctx.commentMap.get(id);
+            const comment = { id };
+            if (c.author) comment.author = c.author;
+            if (c.date) comment.date = c.date;
+            if (c.text) comment.text = c.text;
+            comments.push(comment);
+        });
+
+    const allBlocks = blocks.slice();
+    (ctx.footnoteMap || new Map()).forEach(b => allBlocks.push(...b));
+    (ctx.endnoteMap || new Map()).forEach(b => allBlocks.push(...b));
+
+    return { footnotes, comments, revisions: collectRevisions(allBlocks) };
 }

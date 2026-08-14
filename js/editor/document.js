@@ -232,8 +232,8 @@ export function renderDocument(doc) {
     let renderedFromModel = false;
     if (doc.model) {
         try {
-            validateModel(doc.model);
             const model = normalizeModel(doc.model);
+            validateModel(model);
             debugModelLog('render', model);
             state.container.innerHTML = '';
             modelToPages(model, createPage);

@@ -24,7 +24,9 @@ import {
     parseRels,
     getCoreTitle,
     walkBody,
-    buildWarnings
+    buildWarnings,
+    loadAnnotationParts,
+    buildAnnotationSections
 } from '../js/editor/ooxml.js';
 import { modelToDocxBuffer } from '../js/editor/docxExport.js';
 import { normalizeModel, DEFAULT_FONT_FAMILY } from '../js/editor/model.js';
@@ -63,18 +65,24 @@ async function importDocxToModel(bytes) {
         bookmarks: new Map(),
         bookmarkIds: new Set(),
         pageSetup: null,
-        numbering: null
+        numbering: null,
+        change: null
     };
     const relsDoc = reader.getPart('word/_rels/document.xml.rels');
     if (relsDoc) ctx.rels = parseRels(relsDoc);
+    loadAnnotationParts(ctx);
 
     const bodyEl = documentXml ? documentXml.getElementsByTagNameNS(NS.w, 'body')[0] : null;
     const blocks = bodyEl ? walkBody(bodyEl, ctx) : [];
+    const annotations = buildAnnotationSections(ctx, blocks);
     const title = getCoreTitle(reader);
 
     return normalizeModel({
         title: title || 'Fixture',
         blocks,
+        footnotes: annotations.footnotes,
+        comments: annotations.comments,
+        revisions: annotations.revisions,
         pageFormat: ctx.pageSetup && ctx.pageSetup.format !== 'custom' ? ctx.pageSetup.format : 'a4',
         fontFamily: DEFAULT_FONT_FAMILY,
         updatedAt: 1700000000000
@@ -88,6 +96,13 @@ async function importDocxToModel(bytes) {
  * @returns {object}
  */
 function fidelitySignature(model) {
+    const runSig = run => {
+        const r = {};
+        for (const k of ['text', 'image', 'alt', 'href', 'internal', 'width', 'height', 'type', 'id']) {
+            if (run[k] !== undefined) r[k] = run[k];
+        }
+        return r;
+    };
     const blockSig = block => {
         const out = { type: block.type };
         const listKeys = ['listType', 'level', 'start'];
@@ -97,14 +112,37 @@ function fidelitySignature(model) {
         if (block.src !== undefined) out.src = block.src;
         if (block.width !== undefined) out.width = block.width;
         if (block.height !== undefined) out.height = block.height;
-        if (Array.isArray(block.runs)) {
-            out.runs = block.runs.map(run => {
-                const r = {};
-                for (const k of ['text', 'image', 'alt', 'href', 'internal', 'width', 'height']) {
-                    if (run[k] !== undefined) r[k] = run[k];
+        if (Array.isArray(block.runs)) out.runs = block.runs.map(runSig);
+        if (block.type === 'section') {
+            for (const k of ['pageFormat', 'orientation', 'widthMM', 'heightMM', 'margins', 'pageNumbering']) {
+                if (block[k] !== undefined) out[k] = block[k];
+            }
+            if (Array.isArray(block.header)) {
+                out.header = block.header.map(hb => ({
+                    type: hb.type,
+                    runs: hb.runs ? hb.runs.map(runSig) : undefined
+                }));
+            }
+            if (Array.isArray(block.footer)) {
+                out.footer = block.footer.map(fb => ({
+                    type: fb.type,
+                    runs: fb.runs ? fb.runs.map(runSig) : undefined
+                }));
+            }
+        }
+        if (block.type === 'table') {
+            out.cols = block.cols;
+            out.rows = block.rows.map(row => row.map(cell => {
+                if (cell && typeof cell === 'object') {
+                    return {
+                        text: cell.text,
+                        gridSpan: cell.gridSpan,
+                        shading: cell.shading,
+                        vMerge: cell.vMerge
+                    };
                 }
-                return r;
-            });
+                return cell;
+            }));
         }
         return out;
     };
@@ -119,6 +157,9 @@ describe('M4 golden round-trip corpus', () => {
         assert.ok(FIXTURES.includes('lists-start.docx'), 'lists-start.docx missing');
         assert.ok(FIXTURES.includes('links.docx'), 'links.docx missing');
         assert.ok(FIXTURES.includes('images.docx'), 'images.docx missing');
+        assert.ok(FIXTURES.includes('tables.docx'), 'tables.docx missing');
+        assert.ok(FIXTURES.includes('header-footer.docx'), 'header-footer.docx missing');
+        assert.ok(FIXTURES.includes('page-size.docx'), 'page-size.docx missing');
     });
 
     for (const name of FIXTURES) {

@@ -67,10 +67,23 @@ const VALID_FORMATS = ['a4', 'a5', 'letter', 'legal'];
 
 /**
  * Applies the given page format class to the pages container and updates
- * the checkmarks in the Format menu.
+ * the checkmarks in the Format menu. `'custom'` is display-only (imported
+ * documents with exact sizes): no size class is applied and the document
+ * keeps whatever pageFormat it had.
  * @param {string} format
  */
 export function applyPageFormat(format) {
+    if (format === 'custom') {
+        const container = document.getElementById('pages-container');
+        if (container) VALID_FORMATS.forEach(f => container.classList.remove(`format-${f}`));
+        VALID_FORMATS.forEach(f => {
+            const check = document.getElementById(`format-${f}-check`);
+            if (check) check.style.display = 'none';
+        });
+        const customCheck = document.getElementById('format-custom-check');
+        if (customCheck) customCheck.style.display = 'block';
+        return;
+    }
     if (!VALID_FORMATS.includes(format)) format = 'a4';
 
     const container = document.getElementById('pages-container');
@@ -83,6 +96,8 @@ export function applyPageFormat(format) {
         const check = document.getElementById(`format-${f}-check`);
         if (check) check.style.display = (f === format) ? 'block' : 'none';
     });
+    const customCheck = document.getElementById('format-custom-check');
+    if (customCheck) customCheck.style.display = 'none';
 
     state.currentDoc.pageFormat = format;
 }

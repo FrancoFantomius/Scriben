@@ -207,18 +207,34 @@ function tableBlock(table) {
     let cols = 0;
     for (const tr of rowEls) {
         const row = [];
+        let rowPlaced = 0;
         for (const cell of tr.children) {
             if (cell.tagName === 'TD' || cell.tagName === 'TH') {
-                row.push(cell.textContent);
+                const gridSpan = parseInt(cell.getAttribute('colspan'), 10);
+                const text = cell.textContent;
+                if (isFinite(gridSpan) && gridSpan > 1) {
+                    row.push({ text, gridSpan });
+                    rowPlaced += gridSpan;
+                } else {
+                    row.push(text);
+                    rowPlaced += 1;
+                }
             }
         }
         rows.push(row);
-        cols = Math.max(cols, row.length);
+        if (rowPlaced > cols) cols = rowPlaced;
     }
 
     // Canonical shape: every row is padded to `cols` so the model is stable.
     for (const row of rows) {
-        while (row.length < cols) row.push('');
+        let placed = row.reduce((n, cell) => {
+            if (cell && typeof cell === 'object') return n + (cell.gridSpan || 1);
+            return n + 1;
+        }, 0);
+        while (placed < cols) {
+            row.push('');
+            placed += 1;
+        }
     }
 
     return { type: 'table', cols, rows };
@@ -424,6 +440,7 @@ export function pagesToModel(pageEls) {
                 continue;
             }
             if (child.nodeType !== Node.ELEMENT_NODE) continue;
+            if (child.classList && child.classList.contains('page-chrome')) continue;
             const mapped = elementToBlocks(child);
             if (mapped) blocks.push(...mapped);
         }
@@ -432,8 +449,7 @@ export function pagesToModel(pageEls) {
 }
 
 /**
- * Converts an HTML string into canonical model blocks. Used by the opt-in
- * mammoth fallback path (docxImport.FALLBACK_TO_MAMMOTH).
+ * Converts an HTML string into canonical model blocks.
  * @param {string} html
  * @returns {object[]}
  */
@@ -509,7 +525,8 @@ function makeParagraph(block) {
     // (Chrome/Safari default paragraph separator), keeping rendered output
     // byte-identical to what the legacy editor produced.
     const p = document.createElement('div');
-    p.innerHTML = runsToHtml(block.runs);
+    const inner = runsToHtml(block.runs);
+    p.innerHTML = inner || '<br>';
     return applyAlign(p, block);
 }
 
@@ -542,10 +559,24 @@ function makeTable(block) {
     const cols = Number(block.cols) || 0;
     for (const rowData of (block.rows || [])) {
         const tr = document.createElement('tr');
-        for (let c = 0; c < cols; c++) {
+        let placed = 0;
+        for (const cell of rowData) {
             const td = document.createElement('td');
-            td.textContent = rowData[c] == null ? '' : String(rowData[c]);
+            if (cell && typeof cell === 'object') {
+                td.textContent = cell.text == null ? '' : String(cell.text);
+                if (cell.gridSpan && cell.gridSpan > 1) td.setAttribute('colspan', String(cell.gridSpan));
+                if (cell.shading) td.style.backgroundColor = cell.shading;
+                placed += Number(cell.gridSpan) > 1 ? Number(cell.gridSpan) : 1;
+            } else {
+                td.textContent = cell == null ? '' : String(cell);
+                placed += 1;
+            }
             tr.appendChild(td);
+        }
+        while (placed < cols) {
+            const td = document.createElement('td');
+            tr.appendChild(td);
+            placed += 1;
         }
         table.appendChild(tr);
     }
@@ -631,6 +662,39 @@ function listItemsToDom(listItems) {
     return roots;
 }
 
+function sectionChromeEls(block) {
+    const els = [];
+    if (Array.isArray(block.header) && block.header.length) {
+        const div = document.createElement('div');
+        div.className = 'page-header page-chrome';
+        div.setAttribute('contenteditable', 'false');
+        div.innerHTML = blockToHtml(block.header);
+        els.push(div);
+    }
+    if (Array.isArray(block.footer) && block.footer.length) {
+        const div = document.createElement('div');
+        div.className = 'page-footer page-chrome';
+        div.setAttribute('contenteditable', 'false');
+        div.innerHTML = blockToHtml(block.footer);
+        els.push(div);
+    }
+    return els;
+}
+
+function blockToHtml(blocks) {
+    let html = '';
+    for (const block of blocks || []) {
+        if (!block || typeof block !== 'object') continue;
+        switch (block.type) {
+            case 'paragraph': html += makeParagraph(block).outerHTML; break;
+            case 'heading': html += makeHeading(block).outerHTML; break;
+            case 'horizontalRule': html += makeHorizontalRule().outerHTML; break;
+            default: break;
+        }
+    }
+    return html;
+}
+
 function blockToElements(block) {
     switch (block.type) {
         case 'paragraph': return [makeParagraph(block)];
@@ -678,7 +742,12 @@ export function modelToPages(model, createPageFn = defaultPageFactory) {
             for (const el of listItemsToDom(group)) page.appendChild(el);
             continue;
         }
-        if (block && block.type !== 'section') {
+        if (block && block.type === 'section') {
+            for (const el of sectionChromeEls(block)) page.appendChild(el);
+            i++;
+            continue;
+        }
+        if (block) {
             for (const el of blockToElements(block)) page.appendChild(el);
         }
         i++;

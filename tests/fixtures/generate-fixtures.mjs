@@ -21,7 +21,21 @@ import {
     BookmarkStart,
     BookmarkEnd,
     LevelFormat,
-    HeadingLevel
+    HeadingLevel,
+    Table,
+    TableRow,
+    TableCell,
+    ShadingType,
+    Header,
+    Footer,
+    PageNumber,
+    AlignmentType,
+    FootnoteReferenceRun,
+    EndnoteReferenceRun,
+    CommentRangeStart,
+    CommentRangeEnd,
+    InsertedTextRun,
+    DeletedTextRun
 } from 'docx';
 
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)));
@@ -31,8 +45,12 @@ const PNG_BYTES = Uint8Array.from(
     Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
 );
 
-async function build(name, children, numbering) {
-    const doc = new Document({ numbering, sections: [{ children }] });
+async function build(name, children, numbering, sectionProps, docProps = {}, sectionExtra = {}) {
+    const doc = new Document({
+        numbering,
+        ...docProps,
+        sections: [{ properties: sectionProps, ...sectionExtra, children }]
+    });
     const buffer = await Packer.toBuffer(doc);
     writeFileSync(join(OUT_DIR, name), buffer);
     console.log(`wrote ${name}`);
@@ -111,3 +129,167 @@ await build('images.docx', images);
 // Also emit a plain-text probe fixture used to sanity-check the round-trip
 // harness preserves plain paragraphs around the special content.
 await build('plain-probe.docx', [new Paragraph({ children: [new TextRun('plain')] })]);
+
+// ─── 4. tables.docx ──────────────────────────────────────────────────────────
+// A 3-column table with a row-spanning cell (gridSpan) and a shaded cell.
+const tables = [
+    new Paragraph({ children: [new TextRun('Above table.')] }),
+    new Table({
+        rows: [
+            new TableRow({
+                children: [
+                    new TableCell({
+                        children: [new Paragraph({ children: [new TextRun('A')] })]
+                    }),
+                    new TableCell({
+                        columnSpan: 2,
+                        children: [new Paragraph({ children: [new TextRun('B spans')] })]
+                    })
+                ]
+            }),
+            new TableRow({
+                children: [
+                    new TableCell({
+                        shading: { type: ShadingType.CLEAR, fill: 'D9E2F3' },
+                        children: [new Paragraph({ children: [new TextRun('shaded')] })]
+                    }),
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun('C')] })] }),
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun('D')] })] })
+                ]
+            })
+        ]
+    }),
+    new Paragraph({ children: [new TextRun('Below table.')] })
+];
+
+// ─── 5. header-footer.docx ───────────────────────────────────────────────────
+// Document with a header ("Scriben Report") and a footer containing a
+// PAGE field (page number) — the M5 page-number round-trip probe.
+const header = new Header({
+    children: [new Paragraph({ children: [new TextRun('Scriben Report')] })]
+});
+const footer = new Footer({
+    children: [new Paragraph({ children: [new TextRun('Page '), new TextRun({ children: [PageNumber.CURRENT] })] })]
+});
+const headerFooterBody = [
+    new Paragraph({ children: [new TextRun('Body under header/footer.')] })
+];
+
+// ─── 6. page-size.docx ───────────────────────────────────────────────────────
+// Explicit non-preset page size (120mm x 180mm) with asymmetric margins:
+// forces the exact-size path (classifyFormat → 'custom') on both sides.
+const pageSizeBody = [
+    new Paragraph({ children: [new TextRun('Custom-sized page.')] })
+];
+const customSection = {
+    page: {
+        size: { width: 120, height: 180 },
+        margin: { top: 1000, right: 1500, bottom: 1200, left: 800 }
+    }
+};
+
+await build('tables.docx', tables);
+await build('header-footer.docx', headerFooterBody, undefined, undefined, undefined, {
+    headers: { default: header },
+    footers: { default: footer }
+});
+await build('page-size.docx', pageSizeBody, undefined, customSection);
+
+// ─── 7. formatting.docx ───────────────────────────────────────────────────────
+// Inline formatting: bold, italic, underline, strikethrough, super/subscript,
+// text + highlight colors, an explicit font+size, and all alignments.
+const formatting = [
+    new Paragraph({
+        children: [
+            new TextRun({ text: 'bold ', bold: true }),
+            new TextRun({ text: 'italic ', italics: true }),
+            new TextRun({ text: 'underline ', underline: {} }),
+            new TextRun({ text: 'strike ', strike: true })
+        ]
+    }),
+    new Paragraph({
+        children: [
+            new TextRun({ text: 'H', superScript: true }),
+            new TextRun('2O and '),
+            new TextRun({ text: 'X', subScript: true }),
+            new TextRun(' subscripted')
+        ]
+    }),
+    new Paragraph({
+        children: [
+            new TextRun({ text: 'colored', color: 'C00000' }),
+            new TextRun({ text: ' highlighted', shading: { type: ShadingType.CLEAR, fill: 'FFE599' } })
+        ]
+    }),
+    new Paragraph({
+        children: [
+            new TextRun({ text: 'Times 18pt', font: 'Times New Roman', size: 36 })
+        ]
+    }),
+    new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [new TextRun('centered')]
+    }),
+    new Paragraph({
+        alignment: AlignmentType.RIGHT,
+        children: [new TextRun('right aligned')]
+    }),
+    new Paragraph({
+        alignment: AlignmentType.JUSTIFIED,
+        children: [new TextRun('justified text across a few words here.')]
+    })
+];
+
+// ─── 8. annotations.docx ──────────────────────────────────────────────────────
+// Footnotes, an endnote, two comments with ranges, tracked insert/delete and a
+// tracked format change — the M7 annotation round-trip corpus.
+const annotations = [
+    new Paragraph({
+        children: [
+            new TextRun('Body with a'),
+            new FootnoteReferenceRun(1),
+            new TextRun(' footnote and an'),
+            new EndnoteReferenceRun(1),
+            new TextRun(' endnote.'),
+            new CommentRangeStart(101),
+            new TextRun(' commented'),
+            new CommentRangeEnd(101),
+            new TextRun('.')
+        ]
+    }),
+    new Paragraph({
+        children: [
+            new TextRun('Tracked: '),
+            new InsertedTextRun({ text: 'inserted', id: 1, author: 'Ada', date: '2026-01-02T09:30:00Z' }),
+            new TextRun(' and '),
+            new DeletedTextRun({ text: 'removed', id: 2, author: 'Alan', date: '2026-01-03T11:15:00Z' }),
+            new TextRun({ text: ' (format changed)', revision: { id: 3, author: 'Grace', date: '2026-01-04T14:00:00Z' } })
+        ]
+    })
+];
+
+await build('formatting.docx', formatting);
+await build('annotations.docx', annotations, undefined, undefined, {
+    footnotes: {
+        1: { children: [new Paragraph({ children: [new TextRun('The footnote text.')] })] }
+    },
+    endnotes: {
+        1: { children: [new Paragraph({ children: [new TextRun('The endnote text.')] })] }
+    },
+    comments: {
+        children: [
+            {
+                id: 101,
+                author: 'Ada',
+                date: new Date('2026-01-02T09:30:00Z'),
+                children: [new Paragraph({ children: [new TextRun('Review this wording.')] })]
+            },
+            {
+                id: 102,
+                author: 'Alan',
+                date: new Date('2026-01-03T10:00:00Z'),
+                children: [new Paragraph({ children: [new TextRun('Second review note.')] })]
+            }
+        ]
+    }
+});

@@ -102,18 +102,19 @@
                                     </div>
                                 </a>
                                 <div style="height: 1px; background: var(--color-toolbar-border); margin: 4px 0;"></div>
-                                <a href="#" id="menu-export-pdf" class="dropdown-item">
-                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span class="material-symbols-outlined"
-                                            style="font-size: 18px;">picture_as_pdf</span>
-                                        Export as PDF
-                                    </div>
-                                </a>
+                                <div class="dropdown-subheader">Download</div>
                                 <a href="#" id="menu-export-docx" class="dropdown-item">
                                     <div style="display: flex; align-items: center; gap: 8px;">
                                         <span class="material-symbols-outlined"
                                             style="font-size: 18px;">description</span>
-                                        Export as Word
+                                        Word document (.docx)
+                                    </div>
+                                </a>
+                                <a href="#" id="menu-export-pdf" class="dropdown-item">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">picture_as_pdf</span>
+                                        PDF (.pdf)
                                     </div>
                                 </a>
                             </div>
@@ -296,6 +297,16 @@
                                         A5 (148mm × 210mm)
                                     </div>
                                     <span id="format-a5-check" class="material-symbols-outlined"
+                                        style="font-size: 18px; color: var(--color-brand); display: none;">check</span>
+                                </a>
+                                <div style="height: 1px; background: var(--color-toolbar-border); margin: 4px 0;"></div>
+                                <a href="#" id="menu-format-custom" class="dropdown-item">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="material-symbols-outlined"
+                                            style="font-size: 18px;">description</span>
+                                        Custom size
+                                    </div>
+                                    <span id="format-custom-check" class="material-symbols-outlined"
                                         style="font-size: 18px; color: var(--color-brand); display: none;">check</span>
                                 </a>
                             </div>

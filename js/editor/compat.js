@@ -72,9 +72,32 @@ export function initCompat() {
         });
     }
 
+    const withImportProgress = (run) => {
+        const bar = document.createElement('div');
+        bar.className = 'import-progress';
+        bar.innerHTML =
+            '<div>Opening Word document&hellip;</div>' +
+            '<div class="import-progress-bar"><div class="import-progress-fill"></div></div>';
+        document.body.appendChild(bar);
+        const fill = bar.querySelector('.import-progress-fill');
+        const timer = setInterval(() => {
+            const w = parseFloat(fill.style.width) || 0;
+            fill.style.width = Math.min(90, w + 12) + '%';
+        }, 300);
+        return Promise.resolve().then(run).finally(() => {
+            clearInterval(timer);
+            fill.style.width = '100%';
+            setTimeout(() => bar.remove(), 400);
+        });
+    };
+
+    const importFile = (file) => {
+        if (!file) return;
+        withImportProgress(() => handleDocxFile(file));
+    };
+
     docxInput.addEventListener('change', () => {
-        const file = docxInput.files[0];
-        if (file) handleDocxFile(file);
+        importFile(docxInput.files[0]);
         docxInput.value = '';
     });
 
@@ -110,7 +133,6 @@ export function initCompat() {
     });
     window.addEventListener('drop', (e) => {
         hideOverlay();
-        const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-        if (file) handleDocxFile(file);
+        importFile(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
     });
 }

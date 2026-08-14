@@ -20,15 +20,19 @@ import {
     buildWarnings,
     warn,
     loadFflate,
+    loadAnnotationParts,
+    buildAnnotationSections,
     NS,
     WARNINGS
 } from './ooxml.js';
+import { showToast } from './toast.js';
 
 /**
- * Opt-in fallback to mammoth behind a flag. Disabled by default; the mammoth
- * code path is a candidate for removal in M7 if it never earns a keep.
+ * Soft cap on import size. Larger files are still imported (never blocked),
+ * but the user is warned up front since unzipping + parsing large packages can
+ * take a while. Intentionally below typical browser memory limits.
  */
-export const FALLBACK_TO_MAMMOTH = false;
+export const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
 
 /**
  * Loads the OOXML libraries on demand (fflate). First import only.
@@ -44,10 +48,16 @@ export function ensureOoxmlLib() {
  * @returns {Promise<{blocks:object[], pageFormat:string|null, orientation:string|null, title:string|null, warnings:object[]}>}
  */
 export async function importDocx(file) {
+    const warnings = [];
     const buffer = await file.arrayBuffer();
+    if (file.size > MAX_IMPORT_BYTES) {
+        warnings.push({
+            code: 'LARGE_FILE',
+            message: `This file is large (${(file.size / 1048576).toFixed(1)} MB); import may take a moment.`
+        });
+    }
     const parts = await unzipParts(buffer);
 
-    const warnings = [];
     const reader = createReader(parts, warnings);
 
     const documentXml = reader.getPart('word/document.xml');
@@ -62,7 +72,8 @@ export async function importDocx(file) {
         bookmarks: new Map(),
         bookmarkIds: new Set(),
         pageSetup: null,
-        numbering: null
+        numbering: null,
+        change: null
     };
 
     const relsDoc = reader.getPart('word/_rels/document.xml.rels');
@@ -72,15 +83,28 @@ export async function importDocx(file) {
         warn(ctx, 'MISSING_RELS');
     }
 
+    loadAnnotationParts(ctx);
+
     const bodyEl = documentXml.getElementsByTagNameNS(NS.w, 'body')[0];
     const blocks = bodyEl ? walkBody(bodyEl, ctx) : [];
 
     const title = getCoreTitle(reader);
 
+    const annotations = buildAnnotationSections(ctx, blocks);
+
+    const firstSection = blocks.find(b => b && b.type === 'section');
+    const section = firstSection || (ctx.pageSetup ? {
+        pageFormat: ctx.pageSetup.format,
+        orientation: ctx.pageSetup.orientation
+    } : null);
+
     return {
         blocks,
-        pageFormat: ctx.pageSetup ? ctx.pageSetup.format : null,
-        orientation: ctx.pageSetup ? ctx.pageSetup.orientation : null,
+        footnotes: annotations.footnotes,
+        comments: annotations.comments,
+        revisions: annotations.revisions,
+        pageFormat: section && section.pageFormat !== 'custom' ? section.pageFormat : null,
+        orientation: section ? section.orientation : null,
         title,
         warnings: buildWarnings(warnings)
     };
@@ -106,6 +130,9 @@ export function applyImportResult(result) {
     const model = normalizeModel({
         title: state.currentDoc.title,
         blocks: result.blocks,
+        footnotes: result.footnotes || [],
+        comments: result.comments || [],
+        revisions: result.revisions || [],
         pageFormat: state.currentDoc.pageFormat || 'a4',
         fontFamily: state.currentDoc.fontFamily || DEFAULT_FONT_FAMILY,
         updatedAt: Date.now()
@@ -118,7 +145,15 @@ export function applyImportResult(result) {
     paginate();
     saveContent();
 
-    showToast(`Imported "${state.currentDoc.title}"`, result.warnings.map(w => w.message));
+    const summary = [];
+    const tables = result.blocks.filter(b => b && b.type === 'table').length;
+    if (tables > 0) summary.push(`${tables} table${tables === 1 ? '' : 's'} imported`);
+    if ((result.footnotes || []).length > 0) summary.push(`${result.footnotes.length} footnote${result.footnotes.length === 1 ? '' : 's'} preserved`);
+    if ((result.comments || []).length > 0) summary.push(`${result.comments.length} comment${result.comments.length === 1 ? '' : 's'} preserved`);
+    if ((result.revisions || []).length > 0) summary.push(`${result.revisions.length} tracked change${result.revisions.length === 1 ? '' : 's'} preserved`);
+    summary.push(...result.warnings.map(w => w.message));
+
+    showToast(`Imported "${state.currentDoc.title}"`, summary);
     return state.currentDoc.title;
 }
 
@@ -143,72 +178,7 @@ export async function handleDocxFile(file) {
 }
 
 // ─── Toast plumbing ───────────────────────────────────────────────────────────
+// `showToast` lives in toast.js (shared with docxExport) and is re-exported
+// here for callers that already import it from docxImport.
 
-function escapeHtml(s) {
-    return String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-}
-
-/**
- * Shows a small stacked toast with an optional list of warning lines
- * (max 5 shown, then "and N more").
- * @param {string} title
- * @param {string[]} [lines]
- */
-export function showToast(title, lines = []) {
-    let container = document.getElementById('scriben-toast-container');
-    if (!container) {
-        container = document.createElement('div');
-        container.id = 'scriben-toast-container';
-        container.style.cssText = [
-            'position: fixed',
-            'bottom: 24px',
-            'left: 50%',
-            'transform: translateX(-50%)',
-            'z-index: 20000',
-            'display: flex',
-            'flex-direction: column',
-            'gap: 8px',
-            'align-items: center',
-            'font-family: var(--font-ui, "Google Sans", sans-serif)',
-            'pointer-events: none'
-        ].join('; ');
-        document.body.appendChild(container);
-    }
-
-    const toast = document.createElement('div');
-    toast.style.cssText = [
-        'background: var(--color-dropdown-bg, #ffffff)',
-        'color: var(--color-text, #202124)',
-        'border: 1px solid var(--color-toolbar-border, #dadce0)',
-        'border-radius: 8px',
-        'box-shadow: 0 4px 12px rgba(0,0,0,0.18)',
-        'padding: 12px 16px',
-        'max-width: 440px',
-        'font-size: 13px',
-        'line-height: 1.45',
-        'box-sizing: border-box',
-        'pointer-events: auto'
-    ].join('; ');
-
-    let html = `<div style="font-weight: 600; margin-bottom: 4px;">${escapeHtml(title)}</div>`;
-    const shown = lines.slice(0, 5);
-    if (shown.length > 0) {
-        html += '<div style="color: var(--color-text-secondary, #5f6368);">';
-        html += shown.map(l => `• ${escapeHtml(l)}`).join('<br>');
-        if (lines.length > shown.length) {
-            html += `<br>and ${lines.length - shown.length} more`;
-        }
-        html += '</div>';
-    }
-    toast.innerHTML = html;
-
-    container.appendChild(toast);
-    setTimeout(() => {
-        toast.style.opacity = '0';
-        toast.style.transition = 'opacity 0.3s';
-        setTimeout(() => toast.remove(), 300);
-    }, 6000);
-}
+export { showToast };

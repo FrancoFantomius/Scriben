@@ -318,6 +318,62 @@ describe('round-trip identity', () => {
     });
 });
 
+describe('pagination split-collapse', () => {
+    const IMG = 'data:image/png;base64,AAAA';
+
+    test('data-split clones map to clean paragraph blocks (attribute dropped)', () => {
+        const blocks = pagesToModel(makePages([
+            '<div>head text</div>',
+            `<div data-split="true">continued <img src="${IMG}"> tail</div>`
+        ]));
+        assert.deepStrictEqual(blocks, [
+            { type: 'paragraph', runs: [{ text: 'head text' }] },
+            {
+                type: 'paragraph',
+                runs: [{ text: 'continued ' }, { image: IMG }, { text: ' tail' }]
+            }
+        ]);
+    });
+
+    test('split clones with an inline image at the boundary round-trip stably', () => {
+        assertRoundTrip(makePages([
+            '<div>head text</div>',
+            `<div data-split="true">continued <img src="${IMG}"> tail</div>`
+        ]));
+    });
+
+    test('a continuation clone carries no block-level semantics of its own', () => {
+        const blocks = pagesToModel(makePages([
+            `<div data-split="true" class="unbreakable"><b>bold</b> rest</div>`
+        ]));
+        assert.deepStrictEqual(blocks, [
+            { type: 'paragraph', runs: [{ text: 'bold', bold: true }, { text: ' rest' }] }
+        ]);
+    });
+
+    test('footnote marker at a split boundary survives model normalization', () => {
+        const runs = mergeRuns([
+            { text: 'before' },
+            { type: 'footnoteRef', id: '1' },
+            { text: 'after' },
+            { image: IMG }
+        ]);
+        assert.deepStrictEqual(runs, [
+            { text: 'before' },
+            { type: 'footnoteRef', id: '1' },
+            { text: 'after' },
+            { image: IMG }
+        ]);
+        const model = normalizeModel({
+            blocks: [
+                { type: 'paragraph', runs },
+                { type: 'paragraph', runs: [{ text: 'continuation' }] }
+            ]
+        });
+        assert.deepStrictEqual(model.blocks[0].runs, runs);
+    });
+});
+
 describe('model.js pure functions', () => {
     test('emptyModel returns canonical shape', () => {
         const m = emptyModel('Doc');

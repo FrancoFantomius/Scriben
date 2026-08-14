@@ -11,8 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Word (.docx) round-trip fidelity for nested bullet/numbered lists (including `start`), external + internal anchor hyperlinks, and inline images (byte-identical, never re-encoded). Covers both export (`docxExport.js`: numbering, hyperlinks, bookmarks, `ImageRun`) and import (`ooxml.js`: per-level `w:numPr` resolution).
 - Golden round-trip test corpus (`tests/fixtures/*.docx`, `tests/golden.test.js`): every fixture must survive import → export → import structurally unchanged.
 - `<ol start>` is now captured in the model and re-emitted on export; image nodes record their drawn size.
+- **Annotation export & import** – footnotes, endnotes, comments, and tracked changes (insertions, deletions, format changes) now round-trip through `.docx` (`docxExport.js` `buildNotes`/revision runs, `ooxml.js` annotation parts).
+- **Deterministic export** – repeated exports of the same document are byte-identical: `docProps/core.xml` timestamps are pinned to a fixed value and relationship ids are remapped to a stable sequence.
+- **Fidelity harness** (`tests/roundtrip.test.js`) – per-fixture repair-invariant and byte-stability checks, a 500-paragraph synthetic stress document, and a per-feature exercise check driven by `tests/matrix.json`.
+- **Fidelity matrix** (`tests/matrix.json`) – authoritative per-feature import/export/round-trip status; the `plans/README.md` table now tracks it as the living contract.
+- **Import UX** – drop overlay + progress bar for large files, and a result toast summarizing what was preserved (tables, footnotes, comments, tracked changes counts).
+- **50 MB import guard** – oversized `.docx` files warn (never block) instead of stalling the editor.
+- **Pagination split-collapse tests** – `data-split` clones (including an inline image at the page boundary) collapse cleanly through `pagesToModel`; footnote markers survive model normalization.
+- **CI test job** – `.github/workflows/deploy.yml` now runs `npm test` on Node 24 before building.
+- **Bundle report** – `build:report` prints gzipped sizes of the on-demand conversion chunks (`docx`, `fflate`).
 
 ### Changed
+- File menu restructured: *Open Word document (.docx)* under Open, and *Download* → *Word document (.docx)* / *PDF (.pdf)* (ids unchanged).
+- `docxImport` no longer falls back to mammoth; the hand-rolled OOXML reader (`ooxml.js`) is the only import engine.
 - Soft cap on embedded image size: autosave warns (never blocks) when an image's Base64 payload exceeds 5 MB, since images are intentionally never re-compressed.
 - Updated `@filen/sdk` to v0.4.x and `vite-plugin-node-polyfills` to v0.2.0.
 

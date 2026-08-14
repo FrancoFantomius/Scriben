@@ -41,6 +41,14 @@ Scriben is a fast, privacy-first document editor that runs entirely in the brows
 - **High-resolution rendering** – exports page-by-page at 2x resolution to multi-page PDFs via `html2canvas` and `jspdf` (loaded on demand)
 - **Descriptive filenames** – files are named automatically from the sanitized document title
 
+### Word (.docx) Compatibility
+- **Native import & export** – open `.docx` files from the File menu or drag-and-drop, and download Word documents that reopen with high fidelity
+- **Annotation preservation** – footnotes and endnotes, comments, and tracked changes (insertions, deletions, format changes) survive the round trip
+- **Deterministic export** – exporting the same document twice yields byte-identical files (pinned timestamps and relationship ids), so version-control diffs stay clean
+- **Privacy-preserving** – all conversion runs in the browser (`docx` and `fflate` load on first use); nothing is uploaded
+- **Large-file guard** – oversized files import with a warning instead of stalling, and a progress overlay + summary toast keeps the flow transparent
+- **Fidelity contract** – an automated corpus of 9 `.docx` fixtures enforces import → export → import structural equality; the per-feature matrix in [`tests/matrix.json`](tests/matrix.json) is the source of truth (see [`plans/README.md`](plans/README.md))
+
 ## Getting started
 
 ```bash
@@ -77,6 +85,7 @@ Scriben deploys automatically to GitHub Pages from the `main` branch via the wor
 ├── templates/            # HTML template documents
 ├── img/                  # App icons and assets
 ├── manifest.json         # PWA manifest
+├── tests/                # Round-trip corpus & harness (tests/fixtures/*.docx, matrix.json)
 └── vite.config.js        # Build configuration
 ```
 
@@ -88,6 +97,7 @@ Scriben deploys automatically to GitHub Pages from the `main` branch via the wor
 - **@filen/sdk** – end-to-end encrypted cloud sync
 - **jsPDF & html2canvas** – PDF export (loaded on demand)
 - **@fontsource** – self-hosted web fonts (no external requests)
+- **docx & fflate** – Word (.docx) import/export conversion (loaded on demand)
 
 ## License
 

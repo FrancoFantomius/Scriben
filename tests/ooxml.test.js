@@ -13,7 +13,9 @@ import {
     getCoreTitle,
     walkBody,
     parseSectPr,
-    buildWarnings
+    buildWarnings,
+    loadAnnotationParts,
+    buildAnnotationSections
 } from '../js/editor/ooxml.js';
 
 const dom = new JSDOM('<!DOCTYPE html>');
@@ -68,6 +70,17 @@ function ctxFor(reader) {
         numbering: null
     };
 }
+
+// DOC_FOOTER carries a body-level w:sectPr (A4, 1in margins), so every
+// walkBody call now ends with a trailing `section` block.
+const TRAILING_SECTION = {
+    type: 'section',
+    pageFormat: 'a4',
+    orientation: 'portrait',
+    widthMM: 210,
+    heightMM: 297,
+    margins: { top: 25.4, bottom: 25.4, left: 25.4, right: 25.4 }
+};
 
 function parseDoc(reader) {
     return reader.getPart('word/document.xml');
@@ -186,7 +199,7 @@ describe('walkBody', () => {
         const reader = createReader(parts);
         const blocks = walkBody(bodyOf(reader), ctxFor(reader));
 
-        assert.equal(blocks.length, 2);
+        assert.equal(blocks.length, 3);
         assert.equal(blocks[0].type, 'paragraph');
         assert.equal(blocks[0].align, 'center');
         assert.deepStrictEqual(blocks[0].runs, [
@@ -195,6 +208,7 @@ describe('walkBody', () => {
             { text: 'not bold', bold: false }
         ]);
         assert.deepStrictEqual(blocks[1], { type: 'paragraph', runs: [] });
+        assert.deepStrictEqual(blocks[2], TRAILING_SECTION);
     });
 
     test('maps justify/distribute alignment and unknown alignment warns', async () => {
@@ -256,7 +270,7 @@ describe('walkBody', () => {
         const parts = await unzipParts(makeDocx({ 'word/document.xml': xml }));
         const reader = createReader(parts);
         const blocks = walkBody(bodyOf(reader), ctxFor(reader));
-        assert.deepStrictEqual(blocks.map(b => b.type), ['paragraph', 'pageBreak', 'paragraph']);
+        assert.deepStrictEqual(blocks.map(b => b.type), ['paragraph', 'pageBreak', 'paragraph', 'section']);
         assert.deepStrictEqual(blocks[0].runs, [{ text: 'before' }]);
         assert.deepStrictEqual(blocks[2].runs, [{ text: 'after' }]);
     });
@@ -292,7 +306,7 @@ describe('walkBody', () => {
         const parts = await unzipParts(makeDocx({ 'word/document.xml': xml }));
         const reader = createReader(parts);
         const blocks = walkBody(bodyOf(reader), ctxFor(reader));
-        assert.deepStrictEqual(blocks.map(b => b.type), ['pageBreak', 'paragraph']);
+        assert.deepStrictEqual(blocks.map(b => b.type), ['pageBreak', 'paragraph', 'section']);
     });
 
     test('heading styles and outlineLvl map to heading blocks', async () => {
@@ -306,7 +320,7 @@ describe('walkBody', () => {
         const reader = createReader(parts);
         const blocks = walkBody(bodyOf(reader), ctxFor(reader));
         assert.deepStrictEqual(blocks.map(b => [b.type, b.level]), [
-            ['heading', 1], ['heading', 2], ['heading', 3], ['paragraph', undefined]
+            ['heading', 1], ['heading', 2], ['heading', 3], ['paragraph', undefined], ['section', undefined]
         ]);
     });
 
@@ -577,17 +591,18 @@ describe('lists', () => {
 // ─── T9: warnings taxonomy ────────────────────────────────────────────────────
 
 describe('warning taxonomy', () => {
-    test('tables emit TABLE_DEFERRED', async () => {
+    test('tables parse into table blocks (no TABLE_DEFERRED)', async () => {
         const xml = DOC_HEADER + '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc></w:tr></w:tbl>' + DOC_FOOTER;
         const parts = await unzipParts(makeDocx({ 'word/document.xml': xml }));
         const reader = createReader(parts);
         const ctx = ctxFor(reader);
         const blocks = walkBody(bodyOf(reader), ctx);
-        assert.equal(blocks.length, 0);
-        assert.ok(ctx.warnings.some(w => w.code === 'TABLE_DEFERRED'));
+        assert.equal(blocks[0].type, 'table');
+        assert.deepStrictEqual(blocks[0].rows, [[{ text: 'x' }]]);
+        assert.ok(!ctx.warnings.some(w => w.code === 'TABLE_DEFERRED'));
     });
 
-    test('tracked changes and footnotes warn and flatten', async () => {
+    test('tracked changes are preserved; footnotes defer without content', async () => {
         const xml = DOC_HEADER +
             '<w:p><w:ins><w:r><w:t>added</w:t></w:r></w:ins></w:p>' +
             '<w:p><w:r><w:t>ref</w:t><w:footnoteReference w:id="1"/></w:r></w:p>' +
@@ -596,9 +611,9 @@ describe('warning taxonomy', () => {
         const reader = createReader(parts);
         const ctx = ctxFor(reader);
         const blocks = walkBody(bodyOf(reader), ctx);
-        assert.deepStrictEqual(blocks[0].runs, [{ text: 'added' }]);
+        assert.deepStrictEqual(blocks[0].runs, [{ type: 'insRun', text: 'added' }]);
         assert.deepStrictEqual(blocks[1].runs, [{ text: 'ref' }, { type: 'footnoteRef', id: '1' }]);
-        assert.ok(ctx.warnings.some(w => w.code === 'TRACKED_CHANGE_DEFERRED'));
+        assert.ok(!ctx.warnings.some(w => w.code === 'TRACKED_CHANGE_DEFERRED'));
         assert.ok(ctx.warnings.some(w => w.code === 'FOOTNOTE_DEFERRED'));
     });
 
@@ -614,6 +629,355 @@ describe('warning taxonomy', () => {
     test('buildWarnings normalizes the public shape', () => {
         const out = buildWarnings([{ code: 'TABLE_DEFERRED', message: WARNINGS.TABLE_DEFERRED.message }]);
         assert.deepStrictEqual(out, [{ code: 'TABLE_DEFERRED', message: WARNINGS.TABLE_DEFERRED.message }]);
+    });
+});
+
+// ─── M5: tables, sections, headers/footers, styles/themes ─────────────────────
+
+const HEADER_RELS_XML =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rIdH1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>' +
+    '<Relationship Id="rIdF1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>' +
+    '</Relationships>';
+
+describe('M5 tables', () => {
+    test('gridSpan, vMerge, shading, borders, width and alignment parse', async () => {
+        const xml = DOC_HEADER +
+            '<w:tbl><w:tblPr>' +
+            '<w:tblW w:w="2500" w:type="pct"/>' +
+            '<w:jc w:val="center"/>' +
+            '<w:tblBorders><w:top w:val="single" w:sz="6"/><w:insideH w:val="dashed" w:sz="4"/></w:tblBorders>' +
+            '</w:tblPr>' +
+            '<w:tr>' +
+            '<w:tc><w:tcPr><w:gridSpan w:val="2"/><w:shd w:fill="D9E2F3"/></w:tcPr><w:p><w:r><w:t>span</w:t></w:r></w:p></w:tc>' +
+            '<w:tc><w:tcPr><w:vMerge w:val="restart"/></w:tcPr><w:p><w:r><w:t>v</w:t></w:r></w:p></w:tc>' +
+            '</w:tr>' +
+            '<w:tr>' +
+            '<w:tc><w:p><w:r><w:t>a</w:t></w:r></w:p></w:tc>' +
+            '<w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p><w:r><w:t>b</w:t></w:r></w:p></w:tc>' +
+            '<w:tc><w:p><w:r><w:t>c</w:t></w:r></w:p></w:tc>' +
+            '</w:tr>' +
+            '</w:tbl>' +
+            DOC_FOOTER;
+        const parts = await unzipParts(makeDocx({ 'word/document.xml': xml }));
+        const reader = createReader(parts);
+        const blocks = walkBody(bodyOf(reader), ctxFor(reader));
+        const t = blocks[0];
+        assert.equal(t.type, 'table');
+        assert.equal(t.cols, 3);
+        assert.equal(t.width, '50%');
+        assert.equal(t.alignment, 'center');
+        assert.deepStrictEqual(t.borders, {
+            top: { style: 'single', size: 6 },
+            insideH: { style: 'dashed', size: 4 }
+        });
+        assert.deepStrictEqual(t.rows[0], [
+            { text: 'span', gridSpan: 2, shading: '#D9E2F3' },
+            { text: 'v', vMerge: 'restart' }
+        ]);
+        assert.deepStrictEqual(t.rows[1], [
+            { text: 'a' },
+            { text: 'b', vMerge: 'continue' },
+            { text: 'c' }
+        ]);
+    });
+
+    test('nested tables are skipped with a warning', async () => {
+        const xml = DOC_HEADER +
+            '<w:tbl><w:tr><w:tc>' +
+            '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>inner</w:t></w:r></w:p></w:tc></w:tr></w:tbl>' +
+            '<w:p><w:r><w:t>outer</w:t></w:r></w:p>' +
+            '</w:tc></w:tr></w:tbl>' +
+            DOC_FOOTER;
+        const parts = await unzipParts(makeDocx({ 'word/document.xml': xml }));
+        const reader = createReader(parts);
+        const ctx = ctxFor(reader);
+        const blocks = walkBody(bodyOf(reader), ctx);
+        assert.deepStrictEqual(blocks[0].rows[0][0], { text: 'outer' });
+        assert.ok(ctx.warnings.some(w => w.code === 'NESTED_TABLE_SKIPPED'));
+    });
+});
+
+describe('M5 sections and header/footer', () => {
+    test('a pPr-level sectPr emits a section block mid-body', async () => {
+        const xml = DOC_HEADER +
+            '<w:p><w:r><w:t>first section</w:t></w:r></w:p>' +
+            '<w:p><w:pPr><w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr></w:pPr><w:r><w:t>new section</w:t></w:r></w:p>' +
+            DOC_FOOTER;
+        const parts = await unzipParts(makeDocx({ 'word/document.xml': xml }));
+        const reader = createReader(parts);
+        const blocks = walkBody(bodyOf(reader), ctxFor(reader));
+        const types = blocks.map(b => b.type);
+        assert.deepStrictEqual(types, ['paragraph', 'paragraph', 'section', 'section']);
+    });
+
+    test('header/footer references resolve into section blocks', async () => {
+        const xml = DOC_HEADER +
+            '<w:p><w:r><w:t>body</w:t></w:r></w:p>' +
+            '<w:sectPr>' +
+            '<w:headerReference w:type="default" r:id="rIdH1"/>' +
+            '<w:footerReference w:type="default" r:id="rIdF1"/>' +
+            '<w:pgSz w:w="11906" w:h="16838"/>' +
+            '</w:sectPr>' +
+            '</w:body></w:document>';
+        const HEADER_XML =
+            '<?xml version="1.0" encoding="UTF-8"?>' +
+            '<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+            '<w:p><w:r><w:t>Doc Header</w:t></w:r></w:p>' +
+            '</w:hdr>';
+        const FOOTER_XML =
+            '<?xml version="1.0" encoding="UTF-8"?>' +
+            '<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+            '<w:p><w:r><w:t>Page </w:t></w:r>' +
+            '<w:r><w:fldChar w:fldCharType="begin"/></w:r>' +
+            '<w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>' +
+            '<w:r><w:fldChar w:fldCharType="end"/></w:r>' +
+            '</w:p>' +
+            '</w:ftr>';
+        const parts = await unzipParts(makeDocx({
+            'word/document.xml': xml,
+            'word/_rels/document.xml.rels': HEADER_RELS_XML,
+            'word/header1.xml': HEADER_XML,
+            'word/footer1.xml': FOOTER_XML
+        }));
+        const reader = createReader(parts);
+        const ctx = ctxFor(reader);
+        ctx.rels = parseRels(reader.getPart('word/_rels/document.xml.rels'));
+        const blocks = walkBody(bodyOf(reader), ctx);
+        const section = blocks[blocks.length - 1];
+        assert.equal(section.type, 'section');
+        assert.deepStrictEqual(section.header, [{ type: 'paragraph', runs: [{ text: 'Doc Header' }] }]);
+        assert.deepStrictEqual(section.footer, [{ type: 'paragraph', runs: [{ text: 'Page ' }, { type: 'pageNumber' }] }]);
+        assert.equal(section.pageNumbering, true);
+    });
+
+    test('page numbers appear only when the page-number condition is met', async () => {
+        const xml = DOC_HEADER +
+            '<w:p><w:r><w:t>body</w:t></w:r></w:p>' +
+            '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgNumType w:start="1"/></w:sectPr>' +
+            '</w:body></w:document>';
+        const parts = await unzipParts(makeDocx({ 'word/document.xml': xml }));
+        const reader = createReader(parts);
+        const blocks = walkBody(bodyOf(reader), ctxFor(reader));
+        const section = blocks[blocks.length - 1];
+        assert.equal(section.pageNumbering, true);
+    });
+});
+
+describe('M5 styles and themes', () => {
+    test('docDefaults formatting flows into plain runs', async () => {
+        const xml = DOC_HEADER +
+            '<w:p><w:r><w:t>styled</w:t></w:r></w:p>' +
+            DOC_FOOTER;
+        const STYLES =
+            '<?xml version="1.0"?>' +
+            '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+            '<w:docDefaults>' +
+            '<w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri"/><w:sz w:val="24"/><w:color w:val="333333"/></w:rPr></w:rPrDefault>' +
+            '</w:docDefaults>' +
+            '</w:styles>';
+        const parts = await unzipParts(makeDocx({ 'word/document.xml': xml, 'word/styles.xml': STYLES }));
+        const reader = createReader(parts);
+        const blocks = walkBody(bodyOf(reader), ctxFor(reader));
+        assert.deepStrictEqual(blocks[0].runs, [{ text: 'styled', fontFamily: 'Calibri', fontSize: '12pt', color: '#333333' }]);
+    });
+
+    test('paragraph styles resolve through the basedOn chain', async () => {
+        const xml = DOC_HEADER +
+            '<w:p><w:pPr><w:pStyle w:val="SubT"/></w:pPr><w:r><w:t>sub</w:t></w:r></w:p>' +
+            DOC_FOOTER;
+        const STYLES =
+            '<?xml version="1.0"?>' +
+            '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+            '<w:style w:type="paragraph" w:styleId="BaseP"><w:rPr><w:b/></w:rPr><w:pPr><w:jc w:val="center"/></w:pPr></w:style>' +
+            '<w:style w:type="paragraph" w:styleId="SubT"><w:basedOn w:val="BaseP"/><w:rPr><w:color w:val="FF0000"/></w:rPr></w:style>' +
+            '</w:styles>';
+        const parts = await unzipParts(makeDocx({ 'word/document.xml': xml, 'word/styles.xml': STYLES }));
+        const reader = createReader(parts);
+        const blocks = walkBody(bodyOf(reader), ctxFor(reader));
+        assert.equal(blocks[0].align, 'center');
+        assert.deepStrictEqual(blocks[0].runs, [{ text: 'sub', bold: true, color: '#FF0000' }]);
+    });
+
+    test('theme colors resolve to hex with shade/tint', async () => {
+        const xml = DOC_HEADER +
+            '<w:p><w:r><w:rPr><w:color w:themeColor="accent1" w:themeShade="80"/></w:rPr><w:t>accent</w:t></w:r></w:p>' +
+            DOC_FOOTER;
+        const THEME =
+            '<?xml version="1.0"?>' +
+            '<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' +
+            '<a:themeElements><a:clrScheme name="X">' +
+            '<a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1>' +
+            '<a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>' +
+            '<a:dk2><a:srgbClr val="44546A"/></a:dk2>' +
+            '<a:lt2><a:srgbClr val="E7E6E6"/></a:lt2>' +
+            '<a:accent1><a:srgbClr val="2F5496"/></a:accent1>' +
+            '</a:clrScheme></a:themeElements>' +
+            '</a:theme>';
+        const parts = await unzipParts(makeDocx({ 'word/document.xml': xml, 'word/theme/theme1.xml': THEME }));
+        const reader = createReader(parts);
+        const blocks = walkBody(bodyOf(reader), ctxFor(reader));
+        const run = blocks[0].runs[0];
+        assert.equal(run.color, '#264378'); // #2F5496 shaded 80%
+        assert.equal(run.text, 'accent');
+    });
+
+    test('universal measure page sizes (mm/cm) parse to exact millimeters', async () => {
+        const xml = DOC_HEADER +
+            '<w:p><w:r><w:t>x</w:t></w:r></w:p>' +
+            '<w:sectPr><w:pgSz w:w="210mm" w:h="297mm"/><w:pgMar w:top="2.54cm" w:left="1in"/></w:sectPr>' +
+            '</w:body></w:document>';
+        const parts = await unzipParts(makeDocx({ 'word/document.xml': xml }));
+        const reader = createReader(parts);
+        const ctx = ctxFor(reader);
+        const blocks = walkBody(bodyOf(reader), ctx);
+        const section = blocks[blocks.length - 1];
+        assert.equal(section.pageFormat, 'a4');
+        assert.equal(section.widthMM, 210);
+        assert.equal(section.heightMM, 297);
+        assert.equal(section.margins.top, 25.4);
+        assert.equal(section.margins.left, 25.4);
+    });
+});
+
+// ─── M6: annotations (footnotes, comments, tracked changes) ───────────────────
+
+const FOOTNOTES_XML =
+    '<?xml version="1.0"?>' +
+    '<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+    '<w:footnote w:id="0"><w:type w:val="separator"/><w:p><w:r><w:separator/></w:r></w:p></w:footnote>' +
+    '<w:footnote w:id="1"><w:p><w:r><w:t>First note</w:t></w:r></w:p></w:footnote>' +
+    '<w:footnote w:id="2"><w:p><w:r><w:t>Second note</w:t></w:r></w:p></w:footnote>' +
+    '</w:footnotes>';
+
+const ENDNOTES_XML =
+    '<?xml version="1.0"?>' +
+    '<w:endnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+    '<w:endnote w:id="-1" w:type="separator"><w:p><w:r><w:separator/></w:r></w:p></w:endnote>' +
+    '<w:endnote w:id="1"><w:p><w:r><w:t>An endnote</w:t></w:r></w:p></w:endnote>' +
+    '</w:endnotes>';
+
+const COMMENTS_XML =
+    '<?xml version="1.0"?>' +
+    '<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+    '<w:comment w:id="7" w:author="Ada" w:date="2026-01-01T10:00:00Z">' +
+    '<w:p><w:r><w:t>Please reword this</w:t></w:r></w:p>' +
+    '</w:comment>' +
+    '</w:comments>';
+
+describe('M6 annotations', () => {
+    test('footnotes and comments load into annotation maps', async () => {
+        const xml = DOC_HEADER + '<w:p><w:r><w:t>x</w:t></w:r></w:p>' + DOC_FOOTER;
+        const parts = await unzipParts(makeDocx({
+            'word/document.xml': xml,
+            'word/footnotes.xml': FOOTNOTES_XML,
+            'word/endnotes.xml': ENDNOTES_XML,
+            'word/comments.xml': COMMENTS_XML
+        }));
+        const reader = createReader(parts);
+        const ctx = ctxFor(reader);
+        loadAnnotationParts(ctx);
+        assert.ok(ctx.footnoteMap.has('1'));
+        assert.deepStrictEqual(ctx.footnoteMap.get('2'), [{ type: 'paragraph', runs: [{ text: 'Second note' }] }]);
+        assert.ok(!ctx.footnoteMap.has('0')); // separator skipped
+        assert.ok(ctx.endnoteMap.has('1'));
+        assert.deepStrictEqual(ctx.commentMap.get('7'), {
+            author: 'Ada',
+            date: '2026-01-01T10:00:00Z',
+            text: 'Please reword this'
+        });
+    });
+
+    test('footnote refs resolve when content is present and defer otherwise', async () => {
+        const xml = DOC_HEADER +
+            '<w:p><w:r><w:t>a</w:t><w:footnoteReference w:id="1"/></w:r></w:p>' +
+            '<w:p><w:r><w:t>b</w:t><w:footnoteReference w:id="99"/></w:r></w:p>' +
+            DOC_FOOTER;
+        const parts = await unzipParts(makeDocx({ 'word/document.xml': xml, 'word/footnotes.xml': FOOTNOTES_XML }));
+        const reader = createReader(parts);
+        const ctx = ctxFor(reader);
+        loadAnnotationParts(ctx);
+        const blocks = walkBody(bodyOf(reader), ctx);
+        assert.equal(blocks[0].runs[1].id, '1');
+        assert.equal(blocks[1].runs[1].id, '99');
+        assert.equal(ctx.warnings.filter(w => w.code === 'FOOTNOTE_DEFERRED').length, 1);
+    });
+
+    test('buildAnnotationSections merges footnotes and endnotes with distinct ids', async () => {
+        const xml = DOC_HEADER +
+            '<w:p><w:r><w:t>a</w:t><w:footnoteReference w:id="1"/><w:endnoteReference w:id="1"/></w:r></w:p>' +
+            DOC_FOOTER;
+        const parts = await unzipParts(makeDocx({
+            'word/document.xml': xml,
+            'word/footnotes.xml': FOOTNOTES_XML,
+            'word/endnotes.xml': ENDNOTES_XML
+        }));
+        const reader = createReader(parts);
+        const ctx = ctxFor(reader);
+        loadAnnotationParts(ctx);
+        const blocks = walkBody(bodyOf(reader), ctx);
+        const annotations = buildAnnotationSections(ctx, blocks);
+        assert.equal(annotations.footnotes.length, 3);
+        assert.deepStrictEqual(annotations.footnotes.map(f => f.id), ['1', '2', 'e1']);
+        assert.deepStrictEqual(annotations.footnotes.map(f => f.index), [1, 2, 3]);
+        assert.equal(blocks[0].runs[1].id, '1');
+        assert.equal(blocks[0].runs[2].id, 'e1');
+    });
+
+    test('comment ranges become paired markers', async () => {
+        const xml = DOC_HEADER +
+            '<w:p><w:commentRangeStart w:id="7"/><w:r><w:t>commented</w:t></w:r><w:commentRangeEnd w:id="7"/></w:p>' +
+            DOC_FOOTER;
+        const parts = await unzipParts(makeDocx({ 'word/document.xml': xml }));
+        const reader = createReader(parts);
+        const blocks = walkBody(bodyOf(reader), ctxFor(reader));
+        assert.deepStrictEqual(blocks[0].runs, [
+            { type: 'commentRangeStart', id: '7' },
+            { text: 'commented' },
+            { type: 'commentRangeEnd', id: '7' }
+        ]);
+    });
+
+    test('tracked insertions/deletions keep author/date and register revisions', async () => {
+        const xml = DOC_HEADER +
+            '<w:p><w:r><w:t>before </w:t></w:r><w:ins w:author="Ada" w:date="2026-01-01T00:00:00Z"><w:r><w:t>new </w:t></w:r></w:ins>' +
+            '<w:del w:author="Bob" w:date="2026-01-02T00:00:00Z"><w:r><w:t>old </w:t></w:r></w:del><w:r><w:t>after</w:t></w:r></w:p>' +
+            DOC_FOOTER;
+        const parts = await unzipParts(makeDocx({ 'word/document.xml': xml }));
+        const reader = createReader(parts);
+        const ctx = ctxFor(reader);
+        const blocks = walkBody(bodyOf(reader), ctx);
+        assert.deepStrictEqual(blocks[0].runs, [
+            { text: 'before ' },
+            { type: 'insRun', text: 'new ', author: 'Ada', date: '2026-01-01T00:00:00Z' },
+            { type: 'delRun', text: 'old ', author: 'Bob', date: '2026-01-02T00:00:00Z' },
+            { text: 'after' }
+        ]);
+        const annotations = buildAnnotationSections(ctx, blocks);
+        assert.deepStrictEqual(annotations.revisions, [
+            { kind: 'insert', author: 'Ada', date: '2026-01-01T00:00:00Z' },
+            { kind: 'delete', author: 'Bob', date: '2026-01-02T00:00:00Z' }
+        ]);
+    });
+
+    test('rPrChange surfaces as a format change revision', async () => {
+        const xml = DOC_HEADER +
+            '<w:p><w:r><w:rPr><w:b/><w:rPrChange w:author="Ada" w:date="2026-01-01T00:00:00Z"/></w:rPr><w:t>bold now</w:t></w:r></w:p>' +
+            DOC_FOOTER;
+        const parts = await unzipParts(makeDocx({ 'word/document.xml': xml }));
+        const reader = createReader(parts);
+        const ctx = ctxFor(reader);
+        const blocks = walkBody(bodyOf(reader), ctx);
+        assert.deepStrictEqual(blocks[0].runs, [{
+            text: 'bold now',
+            bold: true,
+            formatChange: { author: 'Ada', date: '2026-01-01T00:00:00Z' }
+        }]);
+        const annotations = buildAnnotationSections(ctx, blocks);
+        assert.deepStrictEqual(annotations.revisions, [
+            { kind: 'format', author: 'Ada', date: '2026-01-01T00:00:00Z' }
+        ]);
     });
 });
 
@@ -651,5 +1015,35 @@ describe('determinism', () => {
         const second = await run();
         assert.equal(first, second);
         assert.ok(first.includes('"green bold"'));
+    });
+});
+
+describe('bug fix regressions', () => {
+    test('parses body-level and run-level mc:AlternateContent', async () => {
+        const xml = DOC_HEADER +
+            '<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">' +
+            '<mc:Choice Requires="w14">' +
+            '<w:p><w:r><w:t>Modern AlternateContent Text</w:t></w:r></w:p>' +
+            '</mc:Choice>' +
+            '</mc:AlternateContent>' +
+            DOC_FOOTER;
+        const parts = await unzipParts(makeDocx({ 'word/document.xml': xml }));
+        const reader = createReader(parts);
+        const ctx = ctxFor(reader);
+        const blocks = walkBody(bodyOf(reader), ctx);
+        const pBlock = blocks.find(b => b.type === 'paragraph');
+        assert.ok(pBlock);
+        assert.equal(pBlock.runs[0].text, 'Modern AlternateContent Text');
+    });
+
+    test('case-insensitive part lookup and BOM stripping', async () => {
+        const xmlWithBOM = '\uFEFF' + DOC_HEADER + '<w:p><w:r><w:t>BOM text</w:t></w:r></w:p>' + DOC_FOOTER;
+        const parts = await unzipParts(makeDocx({ 'Word/Document.xml': xmlWithBOM }));
+        const reader = createReader(parts);
+        const doc = reader.getPart('word/document.xml');
+        assert.ok(doc);
+        const ctx = ctxFor(reader);
+        const blocks = walkBody(doc.getElementsByTagNameNS(NS.w, 'body')[0], ctx);
+        assert.equal(blocks[0].runs[0].text, 'BOM text');
     });
 });
