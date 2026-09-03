@@ -11,7 +11,7 @@
     "deploy": "vite build"
   },
   "dependencies": {
-    "@filen/sdk": "^0.3.12"
+    "@filen/sdk": "^0.4.2"
   },
   "devDependencies": {
     "vite": "^8.0.14",
